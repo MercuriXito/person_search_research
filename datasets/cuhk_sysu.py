@@ -6,8 +6,7 @@ from sklearn.metrics import average_precision_score
 from numba import jit
 
 from .ps_dataset import PersonSearchDataset
-from ..utils.serialization import pickle, unpickle
-from ..utils.evaluator import _compute_iou
+from lib.utils import pickle, unpickle, _compute_iou
 
 
 class CUHK_SYSU(PersonSearchDataset):
@@ -101,8 +100,8 @@ class CUHK_SYSU(PersonSearchDataset):
                 'gt_pids': pids,
                 'flipped': False})
 
-        # pickle(gt_roidb, cache_file)
-        # print('wrote gt roidb to {}'.format(cache_file))
+        pickle(gt_roidb, cache_file)
+        print('wrote gt roidb to {}'.format(cache_file))
 
         return gt_roidb
 
