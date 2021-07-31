@@ -1,5 +1,3 @@
-#-*- coding: utf-8 -*-
-
 import re
 import os.path as osp
 import numpy as np
@@ -9,7 +7,7 @@ from sklearn.metrics import average_precision_score
 from numba import jit
 
 from .ps_dataset import PersonSearchDataset
-from lib.utils import pickle, unpickle, _compute_iou
+from lib.utils.misc import pickle, unpickle, _compute_iou
 
 
 class PRW(PersonSearchDataset):

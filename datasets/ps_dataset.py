@@ -2,6 +2,7 @@ import os.path as osp
 import torch
 import numpy as np
 from PIL import Image
+from torch._C import dtype
 
 
 class PersonSearchDataset(object):
@@ -20,6 +21,10 @@ class PersonSearchDataset(object):
             self.record = self.gt_roidb()
         else:
             self.record = self.load_probes()
+
+        # for test
+        self.probes = self.load_probes()
+        self.roidb = self.gt_roidb()
 
     def get_data_path(self):
         raise NotImplementedError
@@ -44,20 +49,21 @@ class PersonSearchDataset(object):
         img = Image.open(img_path).convert('RGB')
 
         boxes = torch.as_tensor(sample['boxes'], dtype=torch.float32)
-        labels = torch.as_tensor(sample['gt_pids'], dtype=torch.int64)
+        pid_labels = torch.as_tensor(sample['gt_pids'], dtype=torch.int64)
+        labels = torch.ones((len(sample["gt_pids"]), ), dtype=torch.int64)
 
         target = dict(boxes=boxes,
                       labels=labels,
+                      pid_labels=pid_labels,
                       flipped='False',
-                      im_name=im_name
-                      )
+                      im_name=im_name)
 
         if self.transforms is not None:
             img, target = self.transforms(img, target)
 
         if self.mode == 'train':
-            target['labels'] = \
-                self._adapt_pid_to_cls(target['labels'])
+            target['pid_labels'] = \
+                self._adapt_pid_to_cls(target['pid_labels'])
 
         return img, target
 
