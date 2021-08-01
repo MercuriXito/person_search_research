@@ -3,6 +3,8 @@ import os
 import PIL.Image as Image
 from tqdm import tqdm
 
+import torchvision.ops.boxes as box_ops
+
 from evaluation.eval import Person_Search_Features_Extractor
 from models.baseline import build_faster_rcnn_based_models
 from utils import ship_to_cuda
@@ -53,7 +55,34 @@ class FasterRCNNExtractor(Person_Search_Features_Extractor):
             images, targets = ship_to_cuda(images, targets, self.device)
 
             if use_query_ctx_boxes:
-                pass
+                # extract contextual query boxes
+                outputs = self.model.extract_features_without_boxes(images)
+                o_boxes = [o["boxes"] for o in outputs]
+                o_scores = [o["scores"] for o in outputs]
+                num_imgs = len(o_boxes)
+
+                all_boxes, all_scores = [], []
+                for i in range(num_imgs):
+                    box, score = o_boxes[i], o_scores[i]
+                    gt_qbox, gt_score = targets[i]["boxes"], targets[i]["scores"]
+
+                    all_box = torch.cat([box, gt_qbox])
+                    all_score = torch.cat([score, gt_score])
+                    keep = box_ops.nms(all_box, all_score, iou_threshold=0.4)
+                    all_box = all_box[keep]
+                    all_score = all_score[keep]
+
+                    assert all_score[0] == 1
+                    # move the gt boxes to the last one
+                    all_box = torch.cat([all_box[1:], all_box[0].view(-1, 4)])
+                    all_score = torch.cat([all_score[1:], all_score[0].view(1)])
+                    all_boxes.append(all_box)
+                    all_scores.append(all_score)
+
+                new_targets = [
+                    dict(boxes=b, scores=s)
+                    for b, s in zip(all_boxes, all_scores)
+                ]
             else:
                 new_targets = targets
 
@@ -102,7 +131,7 @@ def evaluate():
     model = build_faster_rcnn_based_models(t_args)
 
     # HACK: checkpoint
-    checkpoint_path = os.path.join(args.exp_dir, "checkpoint.pth")
+    checkpoint_path = os.path.join(args.exp_dir, eval_args.checkpoint)
     params = torch.load(checkpoint_path, map_location="cpu")
     model_params = params["model"]
     missed, unexpected = model.load_state_dict(model_params, strict=False)
@@ -111,16 +140,19 @@ def evaluate():
     if len(missed) > 0:
         print(f"Missed keys: {missed}")
 
-    device = torch.device(t_args.eval.device)
-
+    device = torch.device(eval_args.device)
     extractor = FasterRCNNExtractor(model, device)
     res_pkl, table_string = evaluate(extractor, eval_args)
 
-    save_path = checkpoint_path + "eval.pkl"
-    table_string_path = checkpoint_path + "eval.txt"
+    # serealization
+    prefix = "eval"
+    if eval_args.eval_context:
+        prefix = f"ctx.G{eval_args.graph_thred}.{prefix}"
+    save_path = f"{checkpoint_path}.{prefix}.pkl"
+    table_string_path = f"{checkpoint_path}.{prefix}.pkl"
     pkl_dump(res_pkl, save_path)
     with open(table_string_path, "w") as f:
-        f.write(table_string_path)
+        f.write(table_string)
 
 
 if __name__ == '__main__':

@@ -4,3 +4,4 @@ data
 test*.py
 exps/*
 !exps/README.md
+outputs

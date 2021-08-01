@@ -15,7 +15,7 @@ from torch.utils.data.sampler import RandomSampler, BatchSampler
 from models.baseline import build_faster_rcnn_based_models
 from datasets import build_train_cuhk
 import lib.utils.misc as utils
-from utils import ship_to_cuda, yaml_dump, yaml_load
+from utils import ship_to_cuda, yaml_dump
 
 
 def collate(batch):

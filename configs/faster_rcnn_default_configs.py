@@ -111,7 +111,7 @@ _C.train.num_workers = 4
 _C.train.epochs = 20
 _C.train.clip_max_norm = 0.1
 _C.train.resume = ""
-_C.train.output_dir = "exps/exps_cuhk"
+_C.train.output_dir = "exps/test"
 
 _C.train.lr = 1e-4
 _C.train.weight_decay = 1e-4
@@ -131,11 +131,14 @@ _C.train.loss_weights.loss_rpn_box_reg = 5.0
 _C.eval = CN()
 _C.eval.det_thresh = 0.01
 _C.eval.gallery_size = 100
+_C.eval.graph_thred = 0.0
 _C.eval.nms_thresh = 0.5
 _C.eval.use_data = ""
 _C.eval.device = "cuda"
 _C.eval.dataset_file = "cuhksysu"
 _C.eval.dataset_path = "data/cuhk-sysu"
+_C.eval.eval_context = False
+_C.eval.checkpoint = "checkpoint.pth"
 
 # -------------------------------------------------------- #
 #                           Miscs                          #

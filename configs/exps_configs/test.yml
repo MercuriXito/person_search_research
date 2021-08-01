@@ -1,3 +1,0 @@
-train:
-  output_dir: exps/test
-  batch_size: 2

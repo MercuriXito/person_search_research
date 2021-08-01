@@ -13,6 +13,7 @@ from torchvision.models.detection.transform import GeneralizedRCNNTransform
 
 from utils import ship_to_cuda, pkl_load
 from datasets import load_eval_datasets
+from evaluation.context_eval import search_performance_by_sim
 
 
 class Person_Search_Features_Extractor(nn.Module):
@@ -166,11 +167,14 @@ def evaluate(extractor, args):
         query_features = data["query_features"]
         gallery_features = data["gallery_features"]
         gallery_boxes = data["gallery_boxes"]
+        query_boxes = data["query_boxes"]
     else:
         gallery_features, gallery_boxes = \
             extractor.get_gallery_features(roidb, nms_thresh=args.nms_thresh)
         query_features, query_boxes = \
-            extractor.get_query_features(probes, nms_thresh=args.nms_thresh)
+            extractor.get_query_features(
+                probes, nms_thresh=args.nms_thresh,
+                use_query_ctx_boxes=args.eval_context)
 
     # evaluation
     det_ap, det_recall = imdb.detection_performance_calc(
@@ -181,9 +185,11 @@ def evaluate(extractor, args):
         gallery_boxes, det_thresh=args.det_thresh,
         iou_thresh=args.nms_thresh,
         labeled_only=True)
-    mAP, top1, top5, top10, _ = imdb.search_performance_calc(
+
+    mAP, top1, top5, top10, _ = search_performance_by_sim(
         imdb, probes, gallery_boxes, gallery_features, query_features,
-        det_thresh=args.det_thresh, gallery_size=args.gallery_size)
+        det_thresh=args.det_thresh, gallery_size=args.gallery_size,
+        use_context=args.eval_context, graph_thred=args.graph_thred)
 
     table = PrettyTable(field_names=[
         "item", "det_ap", "det_recall", "labeled_ap", "labeled_recall",

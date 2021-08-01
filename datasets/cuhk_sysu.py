@@ -414,9 +414,3 @@ class CUHK_SYSU(PersonSearchDataset):
         if not labeled_only:
             print('  ap = {:.2%}'.format(ap))
         return ap, det_rate
-
-
-def build_cuhk_dataset(args, image_set):
-    return CUHK_SYSU()
-
-
