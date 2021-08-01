@@ -2,7 +2,6 @@ import torch
 import torch.nn.functional as F
 
 from torchvision.models.detection.generalized_rcnn import GeneralizedRCNN
-from torchvision.models.detection.image_list import ImageList
 from torchvision.models.detection.transform import GeneralizedRCNNTransform
 from torchvision.models.detection.rpn import AnchorGenerator, RegionProposalNetwork, RPNHead
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
@@ -40,7 +39,8 @@ class BaseNet(GeneralizedRCNN):
         proposals, proposal_losses = self.rpn(images, rpn_features, targets)
         detections, detector_losses = self.roi_heads(
             features_dict, proposals, images.image_sizes, targets)
-        detections = self.transform.postprocess(detections, images.image_sizes, original_image_sizes)
+        detections = self.transform.postprocess(
+            detections, images.image_sizes, original_image_sizes)
 
         losses = {}
         losses.update(detector_losses)
@@ -77,6 +77,88 @@ class BaseNet(GeneralizedRCNN):
             scaled_boxes.append(rois)
         return scaled_boxes
 
+    @torch.no_grad()
+    def extract_features_with_boxes(self, images, targets, feature_norm=True):
+        """ extract features with boxes.
+        """
+        images, targets = self.transform(images, targets)
+        features_dict = self.backbone(images.tensors)
+
+        proposals = [target["boxes"] for target in targets]
+        box_features = self.roi_heads.box_roi_pool(
+            features_dict, proposals, images.image_sizes)
+        box_features = self.roi_heads.box_head(box_features)
+        embeddings, norms = self.roi_heads.reid_embed_head(box_features)
+
+        if not feature_norm:
+            embeddings = [
+                embedding * norm
+                for embedding, norm in zip(embeddings, norms)
+            ]
+        return embeddings
+
+    @torch.no_grad()
+    def extract_features_with_gtboxes(self, images, targets, feature_norm=True):
+        """ extract features with boxes.
+        """
+        original_image_sizes = []
+        for img in images:
+            val = img.shape[-2:]
+            assert len(val) == 2
+            original_image_sizes.append((val[0], val[1]))
+
+        # first get all detections.
+        images, _ = self.transform(images, None)
+        features_dict = self.backbone(images.tensors)
+        rpn_features = {"feat_res4": features_dict["feat_res4"]}
+        proposals, _ = self.rpn(images, rpn_features, None)
+        detections, _ = self.roi_heads(
+            features_dict, proposals, images.image_sizes, targets)
+
+
+        detections = self.transform.postprocess(
+            detections, images.image_sizes, original_image_sizes)
+        return detections
+
+    @torch.no_grad()
+    def extract_features_without_boxes(self, images):
+        """ extract features with boxes.
+        """
+        original_image_sizes = []
+        for img in images:
+            val = img.shape[-2:]
+            assert len(val) == 2
+            original_image_sizes.append((val[0], val[1]))
+
+        targets = None
+        images, targets = self.transform(images, targets)
+        features_dict = self.backbone(images.tensors)
+        rpn_features = {"feat_res4": features_dict["feat_res4"]}
+        proposals, _ = self.rpn(images, rpn_features, targets)
+        detections, _ = self.roi_heads(
+            features_dict, proposals, images.image_sizes, targets)
+        detections = self.transform.postprocess(
+            detections, images.image_sizes, original_image_sizes)
+        return detections
+
+    @torch.no_grad()
+    def extract_features_by_crop(self, images, targets, feature_norm=True):
+        images, targets = self.transform(images, targets)
+        x1, y1, x2, y2 = map(lambda x: int(round(x)),
+                             targets[0]['boxes'][0].tolist())
+        input_tensor = images.tensors[:, :, y1:y2 + 1, x1:x2 + 1]
+        features = self.backbone(input_tensor)
+        features = features.values()[0]
+        rcnn_features = self.roi_heads.box_head(features)
+        embeddings, norms = self.roi_heads.embedding_head(rcnn_features)
+
+        if not feature_norm:
+            embeddings = [
+                embedding * norm
+                for embedding, norm in zip(embeddings, norms)
+            ]
+        return embeddings
+
 
 class PSRoIHead(RoIHeads):
     """ Additional Branch for person search output.
@@ -88,7 +170,7 @@ class PSRoIHead(RoIHeads):
             box_predictor,
             reid_embed_head,
             oim_loss,
-           reid_feature_dim=256,
+            reid_feature_dim=256,
             # other Faster-RCNN parameters
             *args, **kwargs):
         super(PSRoIHead, self).__init__(
@@ -163,7 +245,7 @@ class PSRoIHead(RoIHeads):
                         "boxes": boxes[i],
                         "labels": labels[i],
                         "scores": scores[i],
-                        "feat": embeddings[i],
+                        "embeddings": embeddings[i],
                         "norm": norms[i],
                     }
                 )

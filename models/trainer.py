@@ -15,11 +15,25 @@ from torch.utils.data.sampler import RandomSampler, BatchSampler
 from models.baseline import build_faster_rcnn_based_models
 from datasets import build_train_cuhk
 import lib.utils.misc as utils
-from utils import ship_to_cuda, yaml_dump
+from utils import ship_to_cuda, yaml_dump, yaml_load
 
 
 def collate(batch):
     return list(zip(*batch))
+
+
+def save_config(args, filename):
+    from yacs.config import CfgNode
+    from easydict import EasyDict
+    if isinstance(args, CfgNode):
+        with open(filename, "w") as f:
+            f.write(args.dump())
+    elif isinstance(args, EasyDict):
+        # TODO: add support for easydict
+        raise Exception("not used for EasyDict")
+    else:
+        # dict
+        yaml_dump(args, filename)
 
 
 def train_one_epoch(
@@ -102,7 +116,7 @@ def main(args):
 
     loss_weights = dict(**args.train.loss_weights)
     output_dir = Path(args.train.output_dir)
-    yaml_dump(args, "config.yml")
+    save_config(args, output_dir / "config.yml")
     print("Start training")
     start_time = time.time()
     for epoch in range(start_epoch, args.train.epochs + 1):

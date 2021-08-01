@@ -17,13 +17,16 @@ from datasets import load_eval_datasets
 
 class Person_Search_Features_Extractor(nn.Module):
     def __init__(self, model, device=None) -> None:
+        super(Person_Search_Features_Extractor, self).__init__()
         self.model = model
         self.device = device
         self.to(self.device)
+        self.model.eval()
+        self._init()
 
     def to(self, device):
         self.model.to(device)
-        self.to(device)
+        self.device = device
 
     def _init(self):
         self.mean = [0.485, 0.456, 0.406]
@@ -38,10 +41,10 @@ class Person_Search_Features_Extractor(nn.Module):
             self.mean, self.std
         )
 
-    def get_query_features(self, probes: List[Dict]):
+    def get_query_features(self, probes: List[Dict], *args, **kwargs):
         raise NotImplementedError()
 
-    def get_gallery_features(self, galleries: List[Dict]):
+    def get_gallery_features(self, galleries: List[Dict], *args, **kwargs):
         raise NotImplementedError()
 
 
@@ -165,10 +168,9 @@ def evaluate(extractor, args):
         gallery_boxes = data["gallery_boxes"]
     else:
         gallery_features, gallery_boxes = \
-            extractor.get_gallery_features(roidb, args.nms_thresh)
+            extractor.get_gallery_features(roidb, nms_thresh=args.nms_thresh)
         query_features, query_boxes = \
-            extractor.get_query_features(probes, args.nms_thresh)
-        raise NotImplementedError("")
+            extractor.get_query_features(probes, nms_thresh=args.nms_thresh)
 
     # evaluation
     det_ap, det_recall = imdb.detection_performance_calc(
@@ -193,6 +195,18 @@ def evaluate(extractor, args):
     format_eval_res = ["item"] + format_eval_res
     table.add_row(format_eval_res)
     print(table)
+
+    # save evaluation results
+    res_pkl = {
+        "gallery_boxes": gallery_boxes,
+        "gallery_features": gallery_features,
+        "query_boxes": query_boxes,
+        "query_features": query_features,
+        "eval_res": eval_res,
+        "eval_args": args,
+    }
+
+    return res_pkl, table.get_string()
 
 
 if __name__ == '__main__':

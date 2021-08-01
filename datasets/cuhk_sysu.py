@@ -1,5 +1,6 @@
 import os.path as osp
 import numpy as np
+from numpy.core.shape_base import atleast_1d
 import torch
 from scipy.io import loadmat
 from sklearn.metrics import average_precision_score, \
@@ -86,6 +87,7 @@ class CUHK_SYSU(PersonSearchDataset):
         # Construct the gt_roidb
         gt_roidb = []
         for im_name in self.imgs:
+            path = osp.join(self.get_data_path(), im_name)
             boxes = name_to_boxes[im_name]
             # is_hard = np.array([1 if h < 50.0 else 0 for h in boxes[:,3]])[:, np.newaxis]
             boxes[:, 2] += boxes[:, 0]
@@ -97,6 +99,7 @@ class CUHK_SYSU(PersonSearchDataset):
             # overlaps = csr_matrix(overlaps) # scipy.sparse.csr_matrix
             gt_roidb.append({
                 'im_name': im_name,
+                'path': path,
                 'boxes': boxes,
                 # 'gt_overlaps': overlaps,
                 # 'gt_ishard': is_hard,
@@ -141,9 +144,11 @@ class CUHK_SYSU(PersonSearchDataset):
         probes = []
         for item in protoc['Query']:
             im_name = str(item['imname'][0, 0][0])
+            path = osp.join(self.get_data_path(), im_name)
             roi = item['idlocate'][0, 0][0].astype(np.int32)
             roi[2:] += roi[:2]
             probes.append({'im_name': im_name,
+                           'path': path,
                            'boxes': roi[np.newaxis, :],
                            'gt_classes': np.array([1]),
                            # Useless. Can be set to any value.

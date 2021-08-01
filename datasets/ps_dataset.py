@@ -45,7 +45,8 @@ class PersonSearchDataset(object):
         # label_pids.min() = 1 if mode = 'train', else label_pids unchanged.
         sample = self.record[idx]
         im_name = sample['im_name']
-        img_path = osp.join(self.data_path, im_name)
+        # img_path = osp.join(self.data_path, im_name)
+        img_path = sample["path"]
         img = Image.open(img_path).convert('RGB')
 
         boxes = torch.as_tensor(sample['boxes'], dtype=torch.float32)
