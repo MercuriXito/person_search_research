@@ -13,7 +13,7 @@ from torch.utils.data.dataloader import DataLoader
 from torch.utils.data.sampler import RandomSampler, BatchSampler
 
 from models.baseline import build_faster_rcnn_based_models
-from datasets import build_train_cuhk
+from datasets import build_trainset
 import lib.utils.misc as utils
 from utils import ship_to_cuda, yaml_dump
 
@@ -74,7 +74,7 @@ def main(args):
     random.seed(args.seed)
 
     # build for dataset
-    dataset = build_train_cuhk(args.train.data_root)
+    dataset = build_trainset(args.train.dataset, args.train.data_root)
     sampler = RandomSampler(dataset)
     batch_sampler = BatchSampler(sampler, batch_size=args.train.batch_size, drop_last=True)
     dataloader = DataLoader(

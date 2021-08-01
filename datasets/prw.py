@@ -49,6 +49,7 @@ class PRW(PersonSearchDataset):
             # overlaps = csr_matrix(overlaps)
             gt_roidb.append({
                 'im_name': im_name,
+                'path': osp.join(self.get_data_path(), im_name),
                 'boxes': rois.astype(np.int32),
                 'gt_pids': ids.astype(np.int32),
                 'flipped': False,
@@ -80,6 +81,7 @@ class PRW(PersonSearchDataset):
             roi = np.clip(roi, 0, None)  # several coordinates are negative
             im_name = linelist[5][:-1] + '.jpg'
             probes.append({'im_name': im_name,
+                           'path': osp.join(self.get_data_path(), im_name),
                            'boxes': roi[np.newaxis, :],
                            # Useless. Can be set to any value.
                            'gt_pids': np.array([pid]),
@@ -235,3 +237,74 @@ class PRW(PersonSearchDataset):
         ret['accs'] = accs
 
         return ret
+
+    def detection_performance_calc(
+            self, gallery_det, det_thresh=0.5,
+            iou_thresh=0.5, labeled_only=False):
+        """
+        gallery_det (list of ndarray): n_det x [x1, y1, x2, y2, score] per image
+
+        det_thresh (float): filter out gallery detections whose scores below this
+        iou_thresh (float): treat as true positive if IoU is above this threshold
+        labeled_only (bool): filter out unlabeled background people
+        """
+        assert len(self.imgs) == len(gallery_det)
+        gt_roidb = self.roidb
+
+        y_true, y_score = [], []
+        count_gt, count_tp = 0, 0
+        for gt, det in zip(gt_roidb, gallery_det):
+            gt_boxes = gt['boxes']
+            if labeled_only:
+                inds = np.where(gt['gt_pids'].ravel() > 0)[0]
+                if len(inds) == 0:
+                    continue
+                gt_boxes = gt_boxes[inds]
+            if det != []:
+                det = np.asarray(det)
+                inds = np.where(det[:, 4].ravel() >= det_thresh)[0]
+                det = det[inds]
+                num_gt = gt_boxes.shape[0]
+                num_det = det.shape[0]
+            else:
+                num_det = 0
+            if num_det == 0:
+                count_gt += num_gt
+                continue
+            ious = np.zeros((num_gt, num_det), dtype=np.float32)
+            for i in range(num_gt):
+                for j in range(num_det):
+                    ious[i, j] = _compute_iou(gt_boxes[i], det[j, :4])
+            tfmat = (ious >= iou_thresh)
+            # for each det, keep only the largest iou of all the gt
+            for j in range(num_det):
+                largest_ind = np.argmax(ious[:, j])
+                for i in range(num_gt):
+                    if i != largest_ind:
+                        tfmat[i, j] = False
+            # for each gt, keep only the largest iou of all the det
+            for i in range(num_gt):
+                largest_ind = np.argmax(ious[i, :])
+                for j in range(num_det):
+                    if j != largest_ind:
+                        tfmat[i, j] = False
+            for j in range(num_det):
+                y_score.append(det[j, -1])
+                if tfmat[:, j].any():
+                    y_true.append(True)
+                else:
+                    y_true.append(False)
+            count_tp += tfmat.sum()
+            count_gt += num_gt
+
+        det_rate = count_tp * 1.0 / count_gt
+        ap = average_precision_score(y_true, y_score) * det_rate
+        # precision, recall, __ = precision_recall_curve(y_true, y_score)
+        # recall *= det_rate
+
+        print('{} detection:'.format(
+            'labeled only' if labeled_only else 'all'))
+        print('  recall = {:.2%}'.format(det_rate))
+        if not labeled_only:
+            print('  ap = {:.2%}'.format(ap))
+        return ap, det_rate

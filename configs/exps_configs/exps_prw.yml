@@ -1,0 +1,8 @@
+train:
+  output_dir: exps/exps_prw
+  batch_size: 2
+  dataset: prw
+  data_root: "data/prw"
+eval:
+  dataset_file: prw
+  dataset_path: data/prw

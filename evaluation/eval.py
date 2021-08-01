@@ -13,7 +13,8 @@ from torchvision.models.detection.transform import GeneralizedRCNNTransform
 
 from utils import ship_to_cuda, pkl_load
 from datasets import load_eval_datasets
-from evaluation.context_eval import search_performance_by_sim
+from evaluation.context_eval import search_performance_by_sim, \
+    search_performance_by_sim_prw
 
 
 class Person_Search_Features_Extractor(nn.Module):
@@ -48,6 +49,27 @@ class Person_Search_Features_Extractor(nn.Module):
     def get_gallery_features(self, galleries: List[Dict], *args, **kwargs):
         raise NotImplementedError()
 
+    @staticmethod
+    def rescale_boxes(boxes, sizes, target_sizes):
+        """
+        args:
+            - boxes: List[Tensor], in x1y1x2y2 format
+            - sizes: List[(h, w)]
+            - target_sizes: List[(h, w)]
+        """
+        ratios = [
+            [ts[0] / s[0], ts[1] / s[1]]
+            for s, ts in zip(sizes, target_sizes)
+        ]
+        new_boxes = []
+        for i, box in enumerate(boxes):
+            hr, wr = ratios[i]
+            scale_ratio = torch.as_tensor([wr, hr, wr, hr])
+            scale_ratio = scale_ratio.view(1, 4).to(box.device)
+            box = box.view(-1, 4) * scale_ratio
+            new_boxes.append(box)
+        return new_boxes
+
 
 class Extractor(Person_Search_Features_Extractor):
     def get_gallery_features(self, galleries: List[Dict], nms_thresh=0.5):
@@ -68,10 +90,9 @@ class Extractor(Person_Search_Features_Extractor):
                 self.model.extract_features_without_bboxes(image)
 
             # scale back to original size
-            rw = w / ow
-            rh = h / oh
-            scale_fct = torch.as_tensor([[rw, rh, rw, rh]]).to(self.device)
-            rois = rois * scale_fct
+            rois = Person_Search_Features_Extractor.rescale_boxes(
+                [rois], [(h, w)], [(oh, ow)]
+            )[0]
 
             # nms
             keep = box_ops.nms(rois, scores, iou_threshold=nms_thresh)
@@ -112,10 +133,9 @@ class Extractor(Person_Search_Features_Extractor):
                 self.model.extract_query_features(image, target["boxes"])
 
             # scale back to original size
-            rw = w / ow
-            rh = h / oh
-            scale_fct = torch.as_tensor([[rw, rh, rw, rh]]).to(self.device)
-            rois = rois * scale_fct
+            rois = Person_Search_Features_Extractor.rescale_boxes(
+                [rois], [(h, w)], [(oh, ow)]
+            )[0]
 
             # nms
             keep = box_ops.nms(rois, scores, iou_threshold=nms_thresh)
@@ -153,11 +173,22 @@ class Extractor(Person_Search_Features_Extractor):
         return new_features, new_boxes
 
 
+def get_eval_func(dataset):
+    if dataset == "cuhk-sysu":
+        return search_performance_by_sim
+    elif dataset == "prw":
+        return search_performance_by_sim_prw
+    else:
+        raise NotImplementedError(
+            f"No implemented eval functions for {dataset}.")
+
+
 def evaluate(extractor, args):
 
     imdb = load_eval_datasets(args)
     probes = imdb.probes
     roidb = imdb.roidb
+    eval_func = get_eval_func(args.dataset_file)
 
     use_data = args.use_data
     # extract features
@@ -176,6 +207,12 @@ def evaluate(extractor, args):
                 probes, nms_thresh=args.nms_thresh,
                 use_query_ctx_boxes=args.eval_context)
 
+        # data = pkl_load("test_features.pkl")
+        # gallery_features = data["gallery_features"]
+        # gallery_boxes = data["gallery_boxes"]
+        # query_features = data["query_features"]
+        # query_boxes = data["query_boxes"]
+
     # evaluation
     det_ap, det_recall = imdb.detection_performance_calc(
         gallery_boxes, det_thresh=args.det_thresh,
@@ -186,7 +223,7 @@ def evaluate(extractor, args):
         iou_thresh=args.nms_thresh,
         labeled_only=True)
 
-    mAP, top1, top5, top10, _ = search_performance_by_sim(
+    mAP, top1, top5, top10, _ = eval_func(
         imdb, probes, gallery_boxes, gallery_features, query_features,
         det_thresh=args.det_thresh, gallery_size=args.gallery_size,
         use_context=args.eval_context, graph_thred=args.graph_thred)

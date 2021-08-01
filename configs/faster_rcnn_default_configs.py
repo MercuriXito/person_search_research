@@ -5,10 +5,6 @@ _C = CN()
 # -------------------------------------------------------- #
 #                           Input                          #
 # -------------------------------------------------------- #
-_C.input = CN()
-_C.input.dataset = "CUHK-SYSU"
-_C.input.data_root = "data/cuhk-sysu/cuhk-sysu"
-
 # # Size of the smallest side of the image
 # _C.input.min_size = 900
 # # Maximum size of the side of the image
@@ -102,6 +98,7 @@ _C.train = CN()
 
 # dataset, dataloader
 _C.train.image_set = "train"
+_C.train.dataset = "cuhk-sysu"
 _C.train.data_root = "data/cuhk-sysu"
 _C.train.aug = "multi_scale_with_crop"
 

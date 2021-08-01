@@ -115,6 +115,9 @@ def get_similarity(
         gallery_feat, query_feat, use_context=True, graph_thred=0.0):
     if len(query_feat.shape) == 1:
         query_feat = query_feat.reshape(1, -1)
+    if len(gallery_feat.shape) == 1:
+        gallery_feat = gallery_feat.reshape(1, -1)
+
     if not use_context:
         query_target_feat = query_feat[-1].reshape(1, -1)
         return get_cosine_sim(gallery_feat, query_target_feat)
@@ -353,17 +356,16 @@ def search_performance_by_sim_prw(
     accs = []
     topk = [1, 5, 10]
     ret = {'image_root': gallery_set.data_path, 'results': []}
-    for i in range(len(probe_set)):
+    for i in tqdm(range(len(probe_set))):
         y_true, y_score = [], []
         imgs, rois = [], []
         count_gt, count_tp = 0, 0
 
         feat_p = probe_feat[i]
-
-        probe_imname = probe_set.record[i]['im_name']
-        probe_roi = probe_set.record[i]['boxes']
-        probe_pid = probe_set.record[i]['gt_pids']
-        probe_cam = probe_set.record[i]['cam_id']
+        probe_imname = probe_set[i]['im_name']
+        probe_roi = probe_set[i]['boxes']
+        probe_pid = probe_set[i]['gt_pids']
+        probe_cam = probe_set[i]['cam_id']
 
         # Find all occurence of this probe
         gallery_imgs = []
