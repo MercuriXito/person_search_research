@@ -149,7 +149,7 @@ def evaluate():
     if eval_args.eval_context:
         prefix = f"ctx.G{eval_args.graph_thred}.{prefix}"
     save_path = f"{checkpoint_path}.{prefix}.pkl"
-    table_string_path = f"{checkpoint_path}.{prefix}.pkl"
+    table_string_path = f"{checkpoint_path}.{prefix}.txt"
     pkl_dump(res_pkl, save_path)
     with open(table_string_path, "w") as f:
         f.write(table_string)

@@ -1,8 +1,13 @@
 train:
-  output_dir: exps/exps_prw
+  # output_dir: exps/exps_prw
+  output_dir: exps/exps_prw.oim
   batch_size: 2
   dataset: prw
   data_root: "data/prw"
 eval:
   dataset_file: prw
   dataset_path: data/prw
+loss:
+  oim:
+    num_pids: 482
+    num_cq_size: 500
