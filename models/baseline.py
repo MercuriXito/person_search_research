@@ -171,6 +171,7 @@ class PSRoIHead(RoIHeads):
             reid_embed_head,
             oim_loss,
             reid_feature_dim=256,
+            graph_head=None,
             # other Faster-RCNN parameters
             *args, **kwargs):
         super(PSRoIHead, self).__init__(
@@ -179,6 +180,7 @@ class PSRoIHead(RoIHeads):
         self.oim_loss = oim_loss
         self.reid_feature_dim = reid_feature_dim
         self.reid_embed_head = reid_embed_head
+        self.graph_head = graph_head
 
     def forward(self,
                 features,      # type: Dict[str, Tensor]
@@ -215,11 +217,14 @@ class PSRoIHead(RoIHeads):
                 class_logits, box_regression, labels, regression_targets)
             loss_oim = self.oim_loss(embeddings, pid_labels)
             boxes = self.box_coder.decode(box_regression, proposals)
+            pred_scores = F.softmax(class_logits, -1)
+
             # postprocess training outputs
             num_persons_per_images = [len(proposal) for proposal in proposals]
             embedding_list = embeddings.split(num_persons_per_images, 0)
             box_list = boxes.split(num_persons_per_images, 0)
             norm_list = norms.split(num_persons_per_images, 0)
+            scores_list = pred_scores.split(num_persons_per_images, 0)
             losses = {
                 "loss_classifier": loss_classifier,
                 "loss_box_reg": loss_box_reg,
@@ -232,7 +237,8 @@ class PSRoIHead(RoIHeads):
                     "labels": labels[idx],
                     "embeddings": embedding_list[idx],
                     "boxes": box_list[idx],
-                    "norm": norm_list[idx]
+                    "norm": norm_list[idx],
+                    "scores": scores_list[idx]
                 })
         else:
             boxes, scores, labels, embeddings, norms = self.postprocess_detections(
@@ -307,7 +313,7 @@ class PSRoIHead(RoIHeads):
                     (proposals_in_image.shape[0],), dtype=torch.int64, device=device
                 )
             else:
-                #  set to self.box_similarity when https://github.com/pytorch/pytorch/issues/27495 lands
+                # set to self.box_similarity when https://github.com/pytorch/pytorch/issues/27495 lands
                 match_quality_matrix = box_ops.box_iou(gt_boxes_in_image, proposals_in_image)
                 matched_idxs_in_image = self.proposal_matcher(match_quality_matrix)
 
@@ -360,7 +366,6 @@ class PSRoIHead(RoIHeads):
         all_labels = []
         all_embeddings = []
         all_norms = []
-        # TODO: embeddings and norms
         for boxes, scores, embedding, norm, image_shape in \
             zip(pred_boxes_list, pred_scores_list, pred_embedding_list, pred_norm_list, image_shapes):
             boxes = box_ops.clip_boxes_to_image(boxes, image_shape)
@@ -497,6 +502,18 @@ def build_faster_rcnn_based_models(args):
             featmap_names=['feat_res5'], in_channels=[2048],
             dim=reid_feature_dim, feature_norm=True)
 
+    # # build context attention head.
+    # use_graph = args.model.roi_head.graph_head.use_graph
+    # if use_graph:
+    #     graph_head = ContextGraphHead(
+    #         reid_feature_dim=256,
+    #         num_stack=args.model.roi_head.graph_head.num_graph_stack,
+    #         nheads=args.model.roi_head.graph_head.nheads,
+    #         dropout=args.model.roi_head.graph_head.dropout,
+    #     )
+    # else:
+    #     graph_head = None
+
     roi_head = PSRoIHead(
         box_roi_pool, box_head, box_predictor,
         reid_head, oim_loss,
@@ -510,6 +527,8 @@ def build_faster_rcnn_based_models(args):
         score_thresh=box_score_thresh,
         nms_thresh=box_nms_thresh,
         detections_per_img=box_detections_per_img,
+        # GraphHead parameters
+        graph_head=None
     )
 
     model = BaseNet(backbone, rpn, roi_head, transform)
@@ -523,7 +542,7 @@ if __name__ == '__main__':
     from configs.faster_rcnn_default_configs import get_default_cfg
     from easydict import EasyDict
     from utils import ship_to_cuda
-    from datasets import build_train_cuhk
+    from datasets import build_trainset
     from torch.utils.data import DataLoader
     from torch.utils.data.sampler import RandomSampler, BatchSampler
 
@@ -533,17 +552,14 @@ if __name__ == '__main__':
     transforms = ToTensor()
 
     # dataset = CUHK_SYSU(root, transforms, "train")
-    dataset = build_train_cuhk(root)
+    dataset = build_trainset("cuhk-sysu", root)
 
     sampler = RandomSampler(dataset)
     batch_sampler = BatchSampler(sampler, batch_size=4, drop_last=True)
     dataloader = DataLoader(dataset, batch_sampler=batch_sampler, num_workers=4, collate_fn=lambda x: x)
 
-    from IPython import embed
-    embed()
-
     image1, target1 = dataset[0]
-    image2, target2 = dataset[2]
+    image2, target2 = dataset[1]
 
     # image_mean = [0.485, 0.456, 0.406]
     # image_std = [0.229, 0.224, 0.225]

@@ -57,7 +57,8 @@ class PersonSearchDataset(object):
                       labels=labels,
                       pid_labels=pid_labels,
                       flipped='False',
-                      im_name=im_name)
+                      im_name=im_name,
+                      item_id=torch.as_tensor(idx))
 
         if self.transforms is not None:
             img, target = self.transforms(img, target)

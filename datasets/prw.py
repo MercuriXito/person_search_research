@@ -1,5 +1,8 @@
 import re
 import os.path as osp
+import random
+from tqdm import tqdm
+
 import numpy as np
 import torch
 from scipy.io import loadmat
@@ -26,6 +29,13 @@ class PRW(PersonSearchDataset):
         return [img[0][0] + '.jpg' for img in imgs]
 
     def gt_roidb(self):
+        cache_file = osp.join(self.root, 'cache',
+                              'PRW_{}_gt_roidb.pkl'.format(self.mode))
+
+        if osp.isfile(cache_file):
+            roidb = unpickle(cache_file)
+            return roidb
+
         gt_roidb = []
         for im_name in self.imgs:
             anno_path = osp.join(self.root, 'annotations', im_name)
@@ -43,10 +53,6 @@ class PRW(PersonSearchDataset):
             assert len(rois) == len(ids)
 
             rois[:, 2:] += rois[:, :2]
-            # num_objs = len(rois)
-            # overlaps = np.zeros((num_objs, self.num_classes), dtype=np.float32)
-            # overlaps[:, 1] = 1.0
-            # overlaps = csr_matrix(overlaps)
             gt_roidb.append({
                 'im_name': im_name,
                 'path': osp.join(self.get_data_path(), im_name),
@@ -54,8 +60,42 @@ class PRW(PersonSearchDataset):
                 'gt_pids': ids.astype(np.int32),
                 'flipped': False,
                 'cam_id': self._get_cam_id(im_name)
-                # 'gt_overlaps': overlaps
             })
+
+        # Search pairs
+        label_filter = lambda x: np.where(x > 0)
+        print("Search Pairs:")
+        for i, item in enumerate(tqdm(gt_roidb)):
+            pids = item["gt_pids"]
+            keep_pid = label_filter(pids)
+            pids = pids[keep_pid].reshape(-1, 1)
+
+            # no labeled persons
+            if pids.size == 0:
+                pair_idx = random.randint(0, len(gt_roidb)-1)
+                gt_roidb[i].update(pair_im_name=gt_roidb[pair_idx]["im_name"])
+                continue
+
+            # search overlap
+            matches = []
+            for j, pitem in enumerate(gt_roidb):
+                if i == j:
+                    matches.append(0)
+                else:
+                    ppids = pitem["gt_pids"]
+                    keep_ppids = label_filter(ppids)
+                    ppids = ppids[keep_ppids].reshape(1, -1)
+                    num_equals = np.sum(pids == ppids).item()
+                    matches.append(num_equals)
+            matches = np.asarray(matches)
+            max_num_overlap = np.max(matches)
+            # randomly pick up all candidate
+            candidate_indices = np.where(matches == max_num_overlap)[0]
+            pair_idx = random.choice(candidate_indices)
+            gt_roidb[i].update(pair_im_name=gt_roidb[pair_idx]["im_name"])
+
+        pickle(gt_roidb, cache_file)
+        print('wrote gt roidb to {}'.format(cache_file))
         return gt_roidb
 
     def _adapt_pid_to_cls(self, label_pids, upid=5555):
@@ -308,3 +348,15 @@ class PRW(PersonSearchDataset):
         if not labeled_only:
             print('  ap = {:.2%}'.format(ap))
         return ap, det_rate
+
+
+if __name__ == '__main__':
+
+    from datasets.transforms import get_transform
+
+    root = "data/prw"
+    transform = get_transform(True)
+    data = PRW(root, transform, "train")
+
+    from IPython import embed
+    embed()

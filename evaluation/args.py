@@ -8,8 +8,8 @@ def get_eval_argparser():
     parser.add_argument("--device", type=str, default="cuda:0")
 
     parser.add_argument(
-        "--dataset-file", default="cuhksysu",
-        choices=["cuhksysu", "prw"], type=str)
+        "--dataset-file", default="cuhk-sysu",
+        choices=["cuhk-sysu", "prw"], type=str)
     parser.add_argument("--dataset-path", default="")
 
     parser.add_argument("--gallery-size", default=100, type=int)

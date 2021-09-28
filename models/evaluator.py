@@ -6,6 +6,7 @@ from tqdm import tqdm
 import torchvision.ops.boxes as box_ops
 
 from evaluation.eval import Person_Search_Features_Extractor
+from evaluation.context_eval import PersonSearchEvaluator
 from models.baseline import build_faster_rcnn_based_models
 from utils import ship_to_cuda
 
@@ -142,7 +143,8 @@ def evaluate():
 
     device = torch.device(eval_args.device)
     extractor = FasterRCNNExtractor(model, device)
-    res_pkl, table_string = evaluate(extractor, eval_args)
+    ps_evaluator = PersonSearchEvaluator(args.dataset_file)
+    res_pkl, table_string = evaluate(extractor, eval_args, ps_evaluator)
 
     # serealization
     prefix = "eval"

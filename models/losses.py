@@ -2,8 +2,8 @@ import torch
 import torch.nn.functional as F
 from torch import autograd, nn
 
+
 class OIM(autograd.Function):
-    @staticmethod
     def forward(ctx, inputs, targets, lut, cq, header, momentum):
         ctx.save_for_backward(inputs, targets, lut, cq, header, momentum)
         outputs_labeled = inputs.mm(lut.t())

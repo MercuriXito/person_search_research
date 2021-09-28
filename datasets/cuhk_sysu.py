@@ -1,10 +1,10 @@
 import os.path as osp
+import random
+from tqdm import tqdm
 import numpy as np
-from numpy.core.shape_base import atleast_1d
 import torch
 from scipy.io import loadmat
-from sklearn.metrics import average_precision_score, \
-    precision_recall_curve
+from sklearn.metrics import average_precision_score
 from numba import jit
 
 from .ps_dataset import PersonSearchDataset
@@ -89,22 +89,46 @@ class CUHK_SYSU(PersonSearchDataset):
         for im_name in self.imgs:
             path = osp.join(self.get_data_path(), im_name)
             boxes = name_to_boxes[im_name]
-            # is_hard = np.array([1 if h < 50.0 else 0 for h in boxes[:,3]])[:, np.newaxis]
             boxes[:, 2] += boxes[:, 0]
             boxes[:, 3] += boxes[:, 1]  # (x1, y1, x2, y2)
             pids = name_to_pids[im_name]
-            # num_objs = len(boxes)
-            # overlaps = np.zeros((num_objs, self.num_classes), dtype=np.float32)
-            # overlaps[:, 1] = 1.0
-            # overlaps = csr_matrix(overlaps) # scipy.sparse.csr_matrix
             gt_roidb.append({
                 'im_name': im_name,
                 'path': path,
                 'boxes': boxes,
-                # 'gt_overlaps': overlaps,
-                # 'gt_ishard': is_hard,
                 'gt_pids': pids,
                 'flipped': False})
+
+        label_filter = lambda x: np.where(x > 0)
+        print("Search Pairs:")
+        for i, item in enumerate(tqdm(gt_roidb)):
+            pids = item["gt_pids"]
+            keep_pid = label_filter(pids)
+            pids = pids[keep_pid].reshape(-1, 1)
+
+            # no labeled persons
+            if pids.size == 0:
+                pair_idx = random.randint(0, len(gt_roidb)-1)
+                gt_roidb[i].update(pair_im_name=gt_roidb[pair_idx]["im_name"])
+                continue
+
+            # search overlap
+            matches = []
+            for j, pitem in enumerate(gt_roidb):
+                if i == j:
+                    matches.append(0)
+                else:
+                    ppids = pitem["gt_pids"]
+                    keep_ppids = label_filter(ppids)
+                    ppids = ppids[keep_ppids].reshape(1, -1)
+                    num_equals = np.sum(pids == ppids).item()
+                    matches.append(num_equals)
+            matches = np.asarray(matches)
+            max_num_overlap = np.max(matches)
+            # randomly pick up all candidate
+            candidate_indices = np.where(matches == max_num_overlap)[0]
+            pair_idx = random.choice(candidate_indices)
+            gt_roidb[i].update(pair_im_name=gt_roidb[pair_idx]["im_name"])
 
         pickle(gt_roidb, cache_file)
         print('wrote gt roidb to {}'.format(cache_file))
@@ -414,3 +438,15 @@ class CUHK_SYSU(PersonSearchDataset):
         if not labeled_only:
             print('  ap = {:.2%}'.format(ap))
         return ap, det_rate
+
+
+if __name__ == '__main__':
+
+    from datasets.transforms import get_transform
+
+    root = "data/cuhk-sysu"
+    transform = get_transform(True)
+    data = CUHK_SYSU(root, transform, "train")
+
+    from IPython import embed
+    embed()

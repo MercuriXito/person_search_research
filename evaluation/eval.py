@@ -13,8 +13,7 @@ from torchvision.models.detection.transform import GeneralizedRCNNTransform
 
 from utils import ship_to_cuda, pkl_load
 from datasets import load_eval_datasets
-from evaluation.context_eval import search_performance_by_sim, \
-    search_performance_by_sim_prw
+from evaluation.context_eval import PersonSearchEvaluator
 
 
 class Person_Search_Features_Extractor(nn.Module):
@@ -173,22 +172,13 @@ class Extractor(Person_Search_Features_Extractor):
         return new_features, new_boxes
 
 
-def get_eval_func(dataset):
-    if dataset == "cuhk-sysu":
-        return search_performance_by_sim
-    elif dataset == "prw":
-        return search_performance_by_sim_prw
-    else:
-        raise NotImplementedError(
-            f"No implemented eval functions for {dataset}.")
-
-
-def evaluate(extractor, args):
+def evaluate(extractor, args, ps_evaluator=None):
 
     imdb = load_eval_datasets(args)
     probes = imdb.probes
     roidb = imdb.roidb
-    eval_func = get_eval_func(args.dataset_file)
+    if ps_evaluator is None:
+        ps_evaluator = PersonSearchEvaluator(args.dataset_file)
 
     use_data = args.use_data
     # extract features
@@ -223,7 +213,7 @@ def evaluate(extractor, args):
         iou_thresh=args.nms_thresh,
         labeled_only=True)
 
-    mAP, top1, top5, top10, _ = eval_func(
+    mAP, top1, top5, top10, _ = ps_evaluator.eval_search(
         imdb, probes, gallery_boxes, gallery_features, query_features,
         det_thresh=args.det_thresh, gallery_size=args.gallery_size,
         use_context=args.eval_context, graph_thred=args.graph_thred)
