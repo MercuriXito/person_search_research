@@ -5,6 +5,7 @@ import os
 import json
 from typing import Iterable
 from pathlib import Path
+from copy import deepcopy
 
 import numpy as np
 import random
@@ -47,11 +48,15 @@ def train_one_epoch(
     print_freq = 5
     loader = iter(data_loader)
 
+    tloss_weights = deepcopy(loss_weights)
+    if epoch == 0:
+        tloss_weights["loss_graph"] = 0.0  # fix the first epoch
+
     for _ in metric_logger.log_every(range(len(data_loader)), print_freq, header):
         images, targets = next(loader)
         images, targets = ship_to_cuda(images, targets, device)
         outputs, loss_dict = model(images, targets, feats_lut)
-        losses = sum([loss_dict[k] * loss_weights[k] for k in loss_dict.keys() if k in loss_weights])
+        losses = sum([loss_dict[k] * tloss_weights[k] for k in loss_dict.keys() if k in tloss_weights])
 
         optimizer.zero_grad()
         losses.backward()
