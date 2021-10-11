@@ -1,18 +1,9 @@
-import pickle
-import os
-import json
 import cv2
-
 import torch
 import numpy as np
 import random
 import time
-
-from yaml import load, dump
-try:
-    from yaml import CLoader as Loader, CDumper as Dumper
-except ImportError:
-    from yaml import Loader, Dumper
+import os
 
 
 def check_save_path(path):
@@ -20,42 +11,6 @@ def check_save_path(path):
     if len(dirname) > 0:
         os.makedirs(dirname, exist_ok=True)
     return path
-
-
-def pkl_load(path):
-    with open(path, "rb") as f:
-        data = pickle.load(f)
-    return data
-
-
-def pkl_dump(data, path):
-    path = check_save_path(path)
-    with open(path, "wb") as f:
-        pickle.dump(data, f)
-
-
-def json_load(path):
-    with open(path, "rb") as f:
-        data = json.load(f)
-    return data
-
-
-def json_dump(data, path):
-    path = check_save_path(path)
-    with open(path, "wb") as f:
-        json.dump(data, f)
-
-
-def yaml_dump(data, path):
-    path = check_save_path(path)
-    with open(path, "w") as f:
-        dump(data, f, Dumper=Dumper)
-
-
-def yaml_load(path):
-    with open(path, "r") as f:
-        data = load(f, Loader=Loader)
-    return data
 
 
 def compute_ap(ranks, num_gt=None):
@@ -78,24 +33,6 @@ def compute_ap(ranks, num_gt=None):
 
     ap = np.sum((recalls[1:] - recalls[:-1]) * precisions)
     return ap
-
-
-def ship_to_cuda(images, targets=None, device=None):
-    if device is None:
-        device = torch.device("cuda:0")
-    images = [image.to(device) for image in images]
-    if targets is not None:
-        new_targets = []
-        for target in targets:
-            new_target = dict()
-            for k, v in target.items():
-                if isinstance(v, (torch.Tensor, np.ndarray)):
-                    v = torch.as_tensor(v).to(device)
-                new_target[k] = v
-            new_targets.append(new_target)
-        return images, new_targets
-    else:
-        return images
 
 
 def cxcywh_to_xyxy(boxes: np.ndarray):

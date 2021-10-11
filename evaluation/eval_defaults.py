@@ -1,16 +1,18 @@
 import torch
 import os
 
-from evaluation.context_eval import GraphPSEvaluator
-from models.evaluator import FasterRCNNExtractor
-from models.graph_net import build_graph_net
+from evaluation.eval import FasterRCNNExtractor
+from evaluation.evaluator import PersonSearchEvaluator
+from models.baseline import build_faster_rcnn_based_models
 
 
-def evaluate():
+def main():
+    """ Default evaluation with baseline network.
+    """
     import argparse
-    from configs.graph_net_default_configs import get_default_cfg
+    from configs.faster_rcnn_default_configs import get_default_cfg
     from evaluation.eval import evaluate
-    from utils import pkl_dump
+    from utils.misc import pickle
 
     parser = argparse.ArgumentParser()
     parser.add_argument("exp_dir")
@@ -28,7 +30,7 @@ def evaluate():
     eval_args = t_args.eval
 
     # load model
-    model = build_graph_net(t_args)
+    model = build_faster_rcnn_based_models(t_args)
 
     # HACK: checkpoint
     checkpoint_path = os.path.join(args.exp_dir, eval_args.checkpoint)
@@ -42,7 +44,7 @@ def evaluate():
 
     device = torch.device(eval_args.device)
     extractor = FasterRCNNExtractor(model, device)
-    ps_evaluator = GraphPSEvaluator(model.graph_head, device, eval_args.dataset_file)
+    ps_evaluator = PersonSearchEvaluator(eval_args.dataset_file)
     res_pkl, table_string = evaluate(extractor, eval_args, ps_evaluator)
 
     # serealization
@@ -51,10 +53,10 @@ def evaluate():
         prefix = f"ctx.G{eval_args.graph_thred}.{prefix}"
     save_path = f"{checkpoint_path}.{prefix}.pkl"
     table_string_path = f"{checkpoint_path}.{prefix}.txt"
-    pkl_dump(res_pkl, save_path)
+    pickle(res_pkl, save_path)
     with open(table_string_path, "w") as f:
         f.write(table_string)
 
 
 if __name__ == '__main__':
-    evaluate()
+    main()

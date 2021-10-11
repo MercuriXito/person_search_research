@@ -1,4 +1,3 @@
-from models.ctx_attn_head import ContextGraphHead
 import numpy as np
 import torch
 import os.path as osp
@@ -8,8 +7,9 @@ from scipy.optimize import linear_sum_assignment
 from scipy.io import loadmat
 from sklearn.metrics import average_precision_score
 
-from lib.utils.misc import _compute_iou
+from utils.misc import _compute_iou
 from models.graph_net import GraphNet
+from models.ctx_attn_head import ContextGraphHead
 
 
 def sigmoid(arr):
@@ -477,6 +477,9 @@ class PersonSearchEvaluator:
 
 
 class GraphPSEvaluator(PersonSearchEvaluator):
+    """ Evaluator adapted for ACAE branch, which differs from original evaluator
+    when getting the similarity.
+    """
     def __init__(self, graph_head, device, dataset_file="cuhk-sysu") -> None:
         super().__init__(dataset_file)
         self.graph_head = graph_head

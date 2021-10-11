@@ -14,8 +14,9 @@ from torch.utils.data.sampler import RandomSampler, BatchSampler
 
 from models.baseline import build_faster_rcnn_based_models
 from datasets import build_trainset
-import lib.utils.misc as utils
-from utils import ship_to_cuda, yaml_dump
+import utils.misc as utils
+from utils.logger import MetricLogger
+from utils.misc import ship_to_cuda, yaml_dump
 
 
 def collate(batch):
@@ -40,7 +41,7 @@ def train_one_epoch(
         model, data_loader: Iterable, optimizer: torch.optim.Optimizer,
         device: torch.device, loss_weights: dict, epoch: int, max_norm: float = 0):
     model.train()
-    metric_logger = utils.MetricLogger(delimiter="  ")
+    metric_logger = MetricLogger(delimiter="  ")
     header = 'Epoch: [{}]'.format(epoch)
     print_freq = 5
     loader = iter(data_loader)

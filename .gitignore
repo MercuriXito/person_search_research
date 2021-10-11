@@ -1,7 +1,8 @@
 .vscode
 data
-**/__pycache__
+__pycache__
 test*.py
 exps/*
 !exps/README.md
 outputs
+todo.md

@@ -2,7 +2,6 @@ from typing import Dict, List
 
 import os
 import PIL.Image as Image
-import numpy as np
 from prettytable import PrettyTable
 
 import torch
@@ -11,9 +10,10 @@ import torchvision.transforms as T
 import torchvision.ops as box_ops
 from torchvision.models.detection.transform import GeneralizedRCNNTransform
 
-from utils import ship_to_cuda, pkl_load
+from utils.misc import ship_to_cuda, unpickle
+from tqdm import tqdm
 from datasets import load_eval_datasets
-from evaluation.context_eval import PersonSearchEvaluator
+from evaluation.evaluator import PersonSearchEvaluator
 
 
 class Person_Search_Features_Extractor(nn.Module):
@@ -70,106 +70,102 @@ class Person_Search_Features_Extractor(nn.Module):
         return new_boxes
 
 
-class Extractor(Person_Search_Features_Extractor):
-    def get_gallery_features(self, galleries: List[Dict], nms_thresh=0.5):
+class FasterRCNNExtractor(Person_Search_Features_Extractor):
+    """ Default Feature Extractor for faster-rcnn based models.
+    """
+    def __init__(self, model, device) -> None:
+        super().__init__(model, device=device)
+
+    def get_gallery_features(self, galleries, *args, **kwargs):
         gallery_features = []
         gallery_rois = []
 
-        for item in galleries:
+        for item in tqdm(galleries):
             img_path = item["path"]
             image = Image.open(img_path)
-            ow, oh = image.size
+            image = [self.transform(image)]
+            image = ship_to_cuda(image, device=self.device)
 
-            image = self.transform(image)
-            image, _ = self.infer_transform([image], None)
-            image = image[0].to(self.device)
-            w, h = image.shape[-2:]
+            outputs = self.model.extract_features_without_boxes(image)
+            outputs = outputs[0]
 
-            features, rois, scores = \
-                self.model.extract_features_without_bboxes(image)
+            boxes, features, scores = \
+                outputs["boxes"], outputs["embeddings"], outputs["scores"]
 
-            # scale back to original size
-            rois = Person_Search_Features_Extractor.rescale_boxes(
-                [rois], [(h, w)], [(oh, ow)]
-            )[0]
-
-            # nms
-            keep = box_ops.nms(rois, scores, iou_threshold=nms_thresh)
-            rois = rois[keep]
-            scores = scores[keep]
-            features = features[keep]
-
+            scores = scores.view(-1, 1)
+            rois = torch.cat([boxes, scores], dim=1)
+            rois = rois.detach().cpu().numpy()
             features = features.detach().cpu().numpy()
-            rois = np.concatenate([
-                rois.detach().cpu().numpy(),
-                scores.detach().cpu().numpy().flatten().reshape(-1, 1)
-            ], axis=1)
 
             gallery_features.append(features)
             gallery_rois.append(rois)
 
         return gallery_features, gallery_rois
 
-    def get_query_features(self, probes: List[Dict], nms_thresh):
+    def get_query_features(self, probes, use_query_ctx_boxes=False, *args, **kwargs):
         query_features = []
         query_rois = []
 
-        for item in probes:
+        for item in tqdm(probes):
             img_path = item["path"]
-            boxes = item["boxes"]
-
             image = Image.open(img_path)
-            ow, oh = image.size
+            images = [self.transform(image)]
 
-            image = self.transform(image)
-            target = [{"boxes": torch.as_tensor(boxes)}]
-            image, target = self.infer_transform([image], target)
-            image, target = ship_to_cuda(image, target)
-            image, target = image[0], target[0]
-            w, h = image.shape[-2:]
+            boxes = item["boxes"]
+            scores = torch.as_tensor([1])
+            targets = [dict(boxes=boxes, scores=scores)]
+            images, targets = ship_to_cuda(images, targets, self.device)
 
-            features, rois, scores = \
-                self.model.extract_query_features(image, target["boxes"])
+            if use_query_ctx_boxes:
+                # extract contextual query boxes
+                outputs = self.model.extract_features_without_boxes(images)
+                o_boxes = [o["boxes"] for o in outputs]
+                o_scores = [o["scores"] for o in outputs]
+                num_imgs = len(o_boxes)
 
-            # scale back to original size
-            rois = Person_Search_Features_Extractor.rescale_boxes(
-                [rois], [(h, w)], [(oh, ow)]
-            )[0]
+                all_boxes, all_scores = [], []
+                for i in range(num_imgs):
+                    box, score = o_boxes[i], o_scores[i]
+                    gt_qbox, gt_score = targets[i]["boxes"], targets[i]["scores"]
 
-            # nms
-            keep = box_ops.nms(rois, scores, iou_threshold=nms_thresh)
-            rois = rois[keep]
-            scores = scores[keep]
-            features = features[keep]
+                    all_box = torch.cat([box, gt_qbox])
+                    all_score = torch.cat([score, gt_score])
+                    keep = box_ops.nms(all_box, all_score, iou_threshold=0.4)
+                    all_box = all_box[keep]
+                    all_score = all_score[keep]
 
+                    assert all_score[0] == 1
+                    # move the gt boxes to the last one
+                    all_box = torch.cat([all_box[1:], all_box[0].view(-1, 4)])
+                    all_score = torch.cat([all_score[1:], all_score[0].view(1)])
+                    all_boxes.append(all_box)
+                    all_scores.append(all_score)
+
+                new_targets = [
+                    dict(boxes=b, scores=s)
+                    for b, s in zip(all_boxes, all_scores)
+                ]
+            else:
+                new_targets = targets
+
+            boxes = [t["boxes"] for t in new_targets]
+            scores = [t["scores"].view(-1, 1) for t in new_targets]
+
+            # support batch_size=1 only
+            boxes = boxes[0]
+            scores = scores[0]
+
+            outputs = self.model.extract_features_with_boxes(images, new_targets)
+            features = outputs
+
+            rois = torch.cat([boxes, scores], dim=1)
+            rois = rois.detach().cpu().numpy()
             features = features.detach().cpu().numpy()
-            rois = np.concatenate([
-                rois.detach().cpu().numpy(),
-                scores.detach().cpu().numpy().flatten().reshape(-1, 1)
-            ], axis=1)
 
             query_features.append(features)
             query_rois.append(rois)
 
         return query_features, query_rois
-
-    def det_filter(self, features, boxes, det_thresh=0.5):
-        num = len(features)
-        new_features = []
-        new_boxes = []
-
-        for i in range(num):
-            box = boxes[i]
-            feats = features[i]
-
-            scores = boxes[:, 4]
-            keep = (scores > det_thresh)
-            box = box[keep]
-            feats = feats[keep]
-
-            new_features.append(feats)
-            new_boxes.append(box)
-        return new_features, new_boxes
 
 
 def evaluate(extractor, args, ps_evaluator=None):
@@ -183,7 +179,7 @@ def evaluate(extractor, args, ps_evaluator=None):
     use_data = args.use_data
     # extract features
     if len(use_data) > 0 and os.path.exists(use_data):
-        data = pkl_load(use_data)
+        data = unpickle(use_data)
         print("load ok.")
         query_features = data["query_features"]
         gallery_features = data["gallery_features"]
@@ -197,7 +193,7 @@ def evaluate(extractor, args, ps_evaluator=None):
                 probes, nms_thresh=args.nms_thresh,
                 use_query_ctx_boxes=args.eval_context)
 
-        # data = pkl_load("test_features.pkl")
+        # data = unpickle("test_features.pkl")
         # gallery_features = data["gallery_features"]
         # gallery_boxes = data["gallery_boxes"]
         # query_features = data["query_features"]

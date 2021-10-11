@@ -1,56 +1,67 @@
-import pickle as pkl
-import json
 import os
 import time
+import torch.distributed as dist
 import datetime
 from collections import deque, defaultdict
-from prettytable import PrettyTable
 
 import torch
-import torch.distributed as dist
+from collections import defaultdict, deque
+from torch.utils.tensorboard import SummaryWriter
+from utils.misc import is_dist_avail_and_initialized
 
 
-# ==================================
-# serialization and de-serialization
-# ==================================
-def pickle(data, file_path):
-    with open(file_path, 'wb') as f:
-        pkl.dump(data, f, pkl.HIGHEST_PROTOCOL)
+class LogWriter(SummaryWriter):
+    def __init__(self, root):
+        os.makedirs(root, exist_ok=True)
+        super().__init__(log_dir=root)
+        self.epoch = 0
+        self.iter = 0
+        self.epoch_interval = 1
+        self.iter_interval = 5
+        self.data = dict()
+        self.window_size = 10
+
+    def update_item(self, key, val=None):
+        if key not in self.data.keys():
+            self.data[key] = []
+        elif val is not None:
+            self.data[key].append(val)
+
+    def update_epoch(self, val=None):
+        if val is None:
+            self.epoch += 1
+        else:
+            assert isinstance(val, int)
+            self.epoch = val
+
+    def update_iter(self, val=None):
+        if val is None:
+            self.iter += 1
+        else:
+            assert isinstance(val, int)
+            self.iter = val
+
+    def _write_to_file(self, data, file):
+        with open(os.path.join(self.log_dir, file)) as f:
+            f.write(data)
+
+    def save_dict_iter(self, data: dict):
+        """ save data in each iteration interval
+        """
+        if self.iter % self.iter_interval == 0:
+            for key, val in data.items():
+                self.update_item(key, val)
+            self.add_scalars("iter", data, global_step=self.iter)
+        self.update_iter()
+
+    def save_dict_epoch(self, data: dict):
+        """ save data in each epoch interval
+        """
+        if self.epoch % self.epoch_interval == 0:
+            self.add_scalars("epoch", data, global_step=self.epoch)
+        self.update_epoch()
 
 
-def unpickle(file_path):
-    with open(file_path, 'rb') as f:
-        data = pkl.load(f)
-    return data
-
-
-def _compute_iou(a, b):
-    x1 = max(a[0], b[0])
-    y1 = max(a[1], b[1])
-    x2 = min(a[2], b[2])
-    y2 = min(a[3], b[3])
-    inter = max(0, x2 - x1) * max(0, y2 - y1)
-    union = (a[2] - a[0]) * (a[3] - a[1]) + \
-        (b[2] - b[0]) * (b[3] - b[1]) - inter
-    return inter * 1.0 / union
-
-
-def read_from_json(filepath):
-    with open(filepath, "r") as f:
-        data = json.load(f)
-    return data
-
-
-def write_to_json(data, filepath):
-    folder = os.path.dirname(filepath)
-    os.makedirs(folder, exist_ok=True)
-    with open(filepath, "w") as f:
-        json.dump(data, f)
-
-
-# ==================================
-# Logger
-# ==================================
 class SmoothedValue(object):
     """
     Track a series of values and provide access to smoothed values over a
@@ -219,49 +230,3 @@ class MetricLogger(object):
                 header, total_time_str, total_time / len(iterable)
             )
         )
-
-
-# ==================================
-# distributed related
-# ==================================
-def is_dist_avail_and_initialized():
-    if not dist.is_available():
-        return False
-    if not dist.is_initialized():
-        return False
-    return True
-
-
-# ==================================
-# misc
-# ==================================
-def print_as_table(data, fieldnames=None):
-    if isinstance(data, dict):
-        fieldnames = list(data.keys())
-        data = list(data.values())
-    else:
-        assert fieldnames is not None, \
-            "fieldnames should not be none, if data is not dict."
-    table = PrettyTable(field_names=fieldnames)
-    table.add_row(data)
-    print(table)
-    return table.get_string()
-
-
-def get_total_grad_norm(parameters, norm_type=2):
-    parameters = list(filter(lambda p: p.grad is not None, parameters))
-    norm_type = float(norm_type)
-    device = parameters[0].grad.device
-    total_norm = torch.norm(torch.stack([torch.norm(p.grad.detach(), norm_type).to(device) for p in parameters]),
-                            norm_type) # not average
-    return total_norm
-
-
-def is_main_process():
-    # TODO: multi-gpu not supported right now, so always return true.
-    return True
-
-
-def save_on_master(*args, **kwargs):
-    if is_main_process():
-        torch.save(*args, **kwargs)

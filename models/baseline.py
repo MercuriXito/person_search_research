@@ -541,7 +541,7 @@ if __name__ == '__main__':
     from datasets.transforms import ToTensor
     from configs.faster_rcnn_default_configs import get_default_cfg
     from easydict import EasyDict
-    from utils import ship_to_cuda
+    from utils.misc import ship_to_cuda
     from datasets import build_trainset
     from torch.utils.data import DataLoader
     from torch.utils.data.sampler import RandomSampler, BatchSampler
@@ -577,7 +577,7 @@ if __name__ == '__main__':
     images, targets = ship_to_cuda(images, targets, device)
 
     # draw boxes
-    # from evaluation.utils import draw_boxes_text
+    # from utils.vis import draw_boxes_text
     # for i in range(len(images.tensors)):
     #     img = images.tensors[i]
     #     boxes = targets[i]["boxes"]
