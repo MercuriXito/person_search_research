@@ -168,9 +168,9 @@ class FasterRCNNExtractor(Person_Search_Features_Extractor):
         return query_features, query_rois
 
 
-def evaluate(extractor, args, ps_evaluator=None):
-
-    imdb = load_eval_datasets(args)
+def evaluate(extractor, args, imdb=None, ps_evaluator=None, res_pkl=None):
+    if imdb is None:
+        imdb = load_eval_datasets(args)
     probes = imdb.probes
     roidb = imdb.roidb
     if ps_evaluator is None:
@@ -178,7 +178,13 @@ def evaluate(extractor, args, ps_evaluator=None):
 
     use_data = args.use_data
     # extract features
-    if len(use_data) > 0 and os.path.exists(use_data):
+    if res_pkl is not None:
+        print("Using res pickle.")
+        query_features = res_pkl["query_features"]
+        gallery_features = res_pkl["gallery_features"]
+        gallery_boxes = res_pkl["gallery_boxes"]
+        query_boxes = res_pkl["query_boxes"]
+    elif len(use_data) > 0 and os.path.exists(use_data):
         data = unpickle(use_data)
         print("load ok.")
         query_features = data["query_features"]
@@ -239,6 +245,4 @@ def evaluate(extractor, args, ps_evaluator=None):
 
 
 if __name__ == '__main__':
-    from evaluation.args import get_eval_argparser
-    args = get_eval_argparser().parse_args()
-    evaluate(None, args)
+    pass

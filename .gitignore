@@ -2,7 +2,7 @@
 data
 __pycache__
 test*.py
-exps/*
+exps
 !exps/README.md
 outputs
-todo.md
+doc

@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as F
+from copy import deepcopy
 
 from torchvision.models.detection.transform import GeneralizedRCNNTransform
 from torchvision.models.detection.rpn import AnchorGenerator, RegionProposalNetwork, RPNHead
@@ -165,10 +166,12 @@ def build_graph_net(args):
     )
 
     # build graph head
+    graph_loss = deepcopy(oim_loss)
     graph_stack = args.model.graph_head.num_graph_stack
     graph_nheads = args.model.graph_head.nheads
     graph_dropout = args.model.graph_head.dropout
     graph_head = build_graph_head(
+        loss=graph_loss,
         reid_feature_dim=256,
         num_stack=graph_stack,
         nheads=graph_nheads,

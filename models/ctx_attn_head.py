@@ -180,7 +180,7 @@ class ContextGraphHead(nn.Module):
 
 
 class DecoderGraph(nn.Module):
-    def __init__(self,
+    def __init__(self, loss,
                  reid_feature_dim=256, num_stack=1,
                  nheads=4, dropout=0.0, *args, **kwargs):
         super().__init__()
@@ -193,7 +193,8 @@ class DecoderGraph(nn.Module):
             layer(reid_feature_dim, nheads, reid_feature_dim, dropout=dropout)
             for i in range(self.num_stack)
         ])
-        self.loss = OIMLoss(256, 5532, 5000, 0.5, 30)
+        self.loss = loss
+        assert isinstance(self.loss, OIMLoss)  # currently, only support OIMLoss
         self.num_pids = 5532
 
     def construct_gt_mask(self, qlabels, glabels):

@@ -196,25 +196,32 @@ class PersonSearchEvaluator:
                     name_to_det_feat[name] = (
                         det_boxes, reID_feat_det, np.array(box_true))
 
+        assert len(probe_set) > 0
+        if "search_idx" in probe_set[0]:
+            # if designate indices for searching.
+            indices = [item["search_idx"] for item in probe_set]
+        else:
+            indices = range(len(probe_set))
+
         aps = []
         accs = []
         topk = [1, 5, 10]
         ret = {'image_root': gallery_set.data_path, 'results': []}
-        for i in tqdm(range(len(probe_set))):
+        for i, si in tqdm(enumerate(indices)):
             y_true, y_score, y_true_box = [], [], []
             imgs, rois = [], []
             count_gt, count_tp = 0, 0
             # Get L2-normalized feature vector
             feat_p = probe_feat[i]
             # Ignore the probe image
-            probe_imname = str(protoc['Query'][i]['imname'][0, 0][0])
-            probe_roi = protoc['Query'][i][
+            probe_imname = str(protoc['Query'][si]['imname'][0, 0][0])
+            probe_roi = protoc['Query'][si][
                 'idlocate'][0, 0][0].astype(np.int32)
             probe_roi[2:] += probe_roi[:2]
             probe_gt = []
             tested = set([probe_imname])
             # 1. Go through the gallery samples defined by the protocol
-            for item in protoc['Gallery'][i].squeeze():
+            for item in protoc['Gallery'][si].squeeze():
                 gallery_imname = str(item[0][0])
                 # some contain the probe (gt not empty), some not
                 gt = item[1][0].astype(np.int32)
