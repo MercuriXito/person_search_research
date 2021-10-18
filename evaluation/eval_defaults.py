@@ -1,5 +1,6 @@
 import torch
 import os
+from models.graph_net import build_graph_net
 
 from utils.misc import pickle
 from models.baseline import build_faster_rcnn_based_models
@@ -8,17 +9,24 @@ from evaluation.eval import FasterRCNNExtractor, evaluate
 from evaluation.evaluator import PersonSearchEvaluator
 
 
-def build_fasterrcnn_from_dir(exp_dir):
+def build_and_load_from_dir(exp_dir, dst_eval_file=""):
     """ load fasterrcnn based model configs from saved folder:
         - resume option from config.yml
         - build model, resume from checkpoint
         - resume evaluation options
     """
-    eval_file = os.path.join(exp_dir, "eval.yml")
+    # target eval config file?
+    if len(dst_eval_file) > 0:
+        eval_file = dst_eval_file
+        assert os.path.exists(eval_file), f"{eval_file}"
+    else:
+        eval_file = os.path.join(exp_dir, "eval.yml")
+
     if os.path.exists(eval_file):
         config_file = eval_file
     else:
         config_file = os.path.join(exp_dir, "config.yml")
+    print(f"Using {config_file} for evaluation.")
 
     t_args = get_default_cfg()
     t_args.merge_from_file(config_file)
@@ -26,7 +34,10 @@ def build_fasterrcnn_from_dir(exp_dir):
     eval_args = t_args.eval
 
     # load model
-    model = build_faster_rcnn_based_models(t_args)
+    if t_args.model.graph_head.use_graph:
+        model = build_graph_net(t_args)
+    else:
+        model = build_faster_rcnn_based_models(t_args)
 
     # HACK: checkpoint
     checkpoint_path = os.path.join(exp_dir, eval_args.checkpoint)
@@ -50,7 +61,7 @@ def main():
     parser.add_argument("exp_dir")
     args = parser.parse_args()
 
-    model, t_args = build_fasterrcnn_from_dir(args.exp_dir)
+    model, t_args = build_and_load_from_dir(args.exp_dir)
     eval_args = t_args.eval
     device = torch.device(eval_args.device)
     extractor = FasterRCNNExtractor(model, device)
@@ -61,7 +72,7 @@ def main():
     # serealization
     prefix = "eval"
     if eval_args.eval_context:
-        prefix = f"ctx.G{eval_args.graph_thred}.{prefix}"
+        prefix = f"cmm.G{eval_args.graph_thred}.{prefix}"
     save_path = f"{checkpoint_path}.{prefix}.pkl"
     table_string_path = f"{checkpoint_path}.{prefix}.txt"
     pickle(res_pkl, save_path)

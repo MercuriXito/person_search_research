@@ -68,11 +68,11 @@ _C.model.roi_head.detections_per_image_test = 300
 #             Additional Contex Graph Head                 #
 # -------------------------------------------------------- #
 
-_C.model.roi_head.graph_head = CN()
-_C.model.roi_head.graph_head.use_graph = False
-_C.model.roi_head.graph_head.num_graph_stack = 1
-_C.model.roi_head.graph_head.nheads = 4
-_C.model.roi_head.graph_head.dropout = 0.0
+_C.model.graph_head = CN()
+_C.model.graph_head.use_graph = False
+_C.model.graph_head.num_graph_stack = 1
+_C.model.graph_head.nheads = 4
+_C.model.graph_head.dropout = 0.0
 
 # -------------------------------------------------------- #
 #                         backbone                         #
@@ -130,6 +130,11 @@ _C.train.loss_weights.loss_box_reg = 5.0
 _C.train.loss_weights.loss_oim = 1.0
 _C.train.loss_weights.loss_objectness = 2.0
 _C.train.loss_weights.loss_rpn_box_reg = 5.0
+_C.train.loss_weights.loss_graph = 0.0
+
+_C.train.graph = CN()
+_C.train.graph.use_ema_lut = False
+_C.train.graph.lut_momentum = 0.1
 
 # -------------------------------------------------------- #
 #                           eval                           #
@@ -145,6 +150,7 @@ _C.eval.device = "cuda"
 _C.eval.dataset_file = "cuhk-sysu"
 _C.eval.dataset_path = "data/cuhk-sysu"
 _C.eval.eval_context = False
+_C.eval.eval_method = "sim"  # proposed for future application.
 _C.eval.checkpoint = "checkpoint.pth"
 
 # -------------------------------------------------------- #

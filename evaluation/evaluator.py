@@ -302,9 +302,10 @@ class PersonSearchEvaluator:
             accs.append([min(1, sum(y_true[:k])) for k in topk])
             # 4. Save result for JSON dump
             new_entry = {'probe_img': str(probe_imname),
-                            'probe_roi': map(float, list(probe_roi)),
-                            'probe_gt': probe_gt,
-                            'gallery': []}
+                         'probe_roi': map(float, list(probe_roi)),
+                         'probe_gt': probe_gt,
+                         'probe_ap': ap,
+                         'gallery': []}
             # only save top-10 predictions
             for k in range(10):
                 new_entry['gallery'].append({
@@ -453,9 +454,10 @@ class PersonSearchEvaluator:
             accs.append([min(1, sum(y_true[:k])) for k in topk])
             # 4. Save result for JSON dump
             new_entry = {'probe_img': str(probe_imname),
-                            'probe_roi': map(float, list(probe_roi.squeeze())),
-                            'probe_gt': probe_gts,
-                            'gallery': []}
+                         'probe_roi': map(float, list(probe_roi.squeeze())),
+                         'probe_gt': probe_gts,
+                         'probe_ap': ap,
+                         'gallery': []}
             # only save top-10 predictions
             for k in range(10):
                 new_entry['gallery'].append({
@@ -524,11 +526,69 @@ class GraphPSEvaluator(PersonSearchEvaluator):
         return scores
 
 
+class AggregatedPSEvaluator(PersonSearchEvaluator):
+    """ Aggregated methods for computing similarity.
+    """
+    def __init__(
+            self, graph_head, device,
+            dataset_file="cuhk-sysu",
+            dense_thresh=20) -> None:
+        super().__init__(dataset_file)
+        self.graph_head = graph_head
+        self.device = device
+        self.dense_thresh = dense_thresh
+        assert isinstance(self.graph_head, ContextGraphHead)
+
+    def get_similarity(self, gallery_feat, query_feat, use_context=True, graph_thred=0):
+        num = len(query_feat)
+        if num > self.dense_thresh:
+            scores = self.get_graph_based_similarity(
+                gallery_feat, query_feat, use_context, graph_thred)
+        else:
+            scores = super().get_similarity(
+                gallery_feat, query_feat, use_context, graph_thred)
+        return scores
+
+    def get_graph_based_similarity(self, gallery_feat, query_feat, use_context=True, graph_thred=0):
+        if len(query_feat.shape) == 1:
+            query_feat = query_feat.reshape(1, -1)
+        if len(gallery_feat.shape) == 1:
+            gallery_feat = gallery_feat.reshape(1, -1)
+
+        if not use_context:
+            query_target_feat = query_feat[-1].reshape(1, -1)
+            return get_cosine_sim(gallery_feat, query_target_feat)
+
+        idx = -1
+        query_context_feat = query_feat[:idx, :]
+        query_target_feat = query_feat[idx, :][None]
+
+        indv_scores = np.matmul(gallery_feat, query_target_feat.T)
+        if len(query_context_feat) == 0:
+            return indv_scores
+
+        with torch.no_grad():
+            gallery_feat = torch.as_tensor(gallery_feat).to(self.device)
+            query_context_feat = torch.as_tensor(query_context_feat).to(self.device)
+            query_target_feat = torch.as_tensor(query_target_feat).to(self.device)
+            scores = self.graph_head.inference(
+                gallery_feat, query_context_feat, query_target_feat,
+                graph_thred=graph_thred
+            )
+        scores = scores.cpu().numpy()
+        return scores
+
+
 def build_evaluator(dataset, eval_method, model=None, device=None):
     if eval_method == "graph":
         assert model is not None
         assert device is not None
         assert isinstance(model, GraphNet)
         return GraphPSEvaluator(model.graph_head, device, dataset)
+    elif eval_method == "aggregated":
+        assert model is not None
+        assert device is not None
+        assert isinstance(model, GraphNet)
+        return AggregatedPSEvaluator(model.graph_head, device, dataset)
     else:
         return PersonSearchEvaluator(dataset)

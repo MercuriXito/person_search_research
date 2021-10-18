@@ -9,7 +9,6 @@ from models.losses import OIMLoss
 
 
 # ------------------------------ Graph Head ---------------------------------
-
 def build_graph_head(*args, **kwargs):
     graph_module = DecoderGraph(*args, **kwargs)
     graph_head = ContextGraphHead(graph_module)
@@ -268,7 +267,6 @@ class DecoderGraph(nn.Module):
 
 
 # ------------------------------ Image LUT ---------------------------------
-
 class ImageFeaturesLut:
     """ Lut for saving the temporal features
     """

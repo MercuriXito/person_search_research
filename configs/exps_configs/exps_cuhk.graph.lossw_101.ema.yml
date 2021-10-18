@@ -1,0 +1,15 @@
+# experiments:
+# - CUHK-SYSU; 
+# - w/ ACAE
+# - lossw_101; 
+# - update with EMA;
+
+train:
+  output_dir: exps/exps_cuhk.graph.lossw_101.ema
+  batch_size: 2
+  loss_weights:
+    loss_graph: 0.1
+  graph:
+    use_ema_lut: false
+    lut_momentum: 0.1
+
