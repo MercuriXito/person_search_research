@@ -489,14 +489,20 @@ class GraphPSEvaluator(PersonSearchEvaluator):
     """ Evaluator adapted for ACAE branch, which differs from original evaluator
     when getting the similarity.
     """
-    def __init__(self, graph_head, device, dataset_file="cuhk-sysu") -> None:
+    def __init__(self, graph_head, device, dataset_file="cuhk-sysu", **eval_kwargs) -> None:
         super().__init__(dataset_file)
         self.graph_head = graph_head
         self.device = device
         assert isinstance(self.graph_head, ContextGraphHead)
 
+        self.eval_all_sim = False
+        if "eval_all_sim" in eval_kwargs and eval_kwargs["eval_all_sim"] == True:
+            self.eval_all_sim = True
+            print("Eval all sim.")
+
     def get_similarity(
-            self, gallery_feat, query_feat, use_context, graph_thred):
+            self, gallery_feat, query_feat, use_context, graph_thred,
+            **eval_kwargs):
         if len(query_feat.shape) == 1:
             query_feat = query_feat.reshape(1, -1)
         if len(gallery_feat.shape) == 1:
@@ -520,7 +526,8 @@ class GraphPSEvaluator(PersonSearchEvaluator):
             query_target_feat = torch.as_tensor(query_target_feat).to(self.device)
             scores = self.graph_head.inference(
                 gallery_feat, query_context_feat, query_target_feat,
-                graph_thred=graph_thred
+                graph_thred=graph_thred,
+                eval_all_sim=self.eval_all_sim
             )
         scores = scores.cpu().numpy()
         return scores

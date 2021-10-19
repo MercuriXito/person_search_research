@@ -1,11 +1,27 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torchvision.ops.boxes as box_ops
 
 import random
 from collections import defaultdict
 
 from models.losses import OIMLoss
+
+
+def reshape_back(x):
+    return x.view(-1, x.size()[-1])
+
+
+def normalize(x, dim=1):
+    return F.normalize(x, p=2, dim=dim)
+
+
+def apply_all(func, *args):
+    res = []
+    for arg in args:
+        res.append(func(arg))
+    return res
 
 
 # ------------------------------ Graph Head ---------------------------------
@@ -162,14 +178,16 @@ class ContextGraphHead(nn.Module):
             self, gallery_embeddings,
             query_ctx_embedding,
             query_target_embedding,
-            graph_thred):
+            graph_thred,
+            eval_all_sim=False):
         reid_scores = torch.matmul(gallery_embeddings, query_target_embedding.T)
         if len(query_ctx_embedding) == 0:
             return reid_scores
 
         gfeats = gallery_embeddings
         qfeats = torch.cat([query_ctx_embedding, query_target_embedding])
-        sim_matrix = self.graph_head(gfeats, qfeats)
+        sim_matrix = self.graph_head(
+            gfeats, qfeats, eval_avg_sim=eval_all_sim)
         graph_scores = sim_matrix[:, -1][..., None]
 
         scores = graph_thred * graph_scores + (1 - graph_thred) * reid_scores
@@ -186,8 +204,8 @@ class DecoderGraph(nn.Module):
 
         self.num_stack = num_stack
         self.feat_dim = reid_feature_dim
-        layer = nn.TransformerDecoderLayer
-        # layer = AttnGraphLayer
+        # layer = nn.TransformerDecoderLayer
+        layer = AttnGraphLayer
         self.heads = nn.ModuleList([
             layer(reid_feature_dim, nheads, reid_feature_dim, dropout=dropout)
             for i in range(self.num_stack)
@@ -216,7 +234,8 @@ class DecoderGraph(nn.Module):
         return gt_mask
 
     def forward(self, gfeats, qfeats,
-                qlabels=None, glabels=None, *args, **kwargs):
+                qlabels=None, glabels=None,
+                eval_avg_sim=False, *args, **kwargs):
         """ [NxC] input for both features, return similarity matrix.
         """
         # reshape to sequence-like input
@@ -224,17 +243,30 @@ class DecoderGraph(nn.Module):
         gfeats = gfeats.view(-1, 1, self.feat_dim)
 
         for layer in self.heads:
-            qfeats, gfeats = \
-                layer(qfeats, gfeats), layer(gfeats, qfeats)
+            qouts, gouts = layer(qfeats, gfeats), layer(gfeats, qfeats)
+            qfeats, qself_feats, qcross_feats = qouts
+            gfeats, gself_feats, gcross_feats = gouts
 
-        # reshape back
-        qfeats = qfeats.view(-1, self.feat_dim)
-        gfeats = gfeats.view(-1, self.feat_dim)
+            # reshape back
+            qfeats, qself_feats, qcross_feats = \
+                apply_all(reshape_back, qfeats, qself_feats, qcross_feats)
+            gfeats, gself_feats, gcross_feats = \
+                apply_all(reshape_back, gfeats, gself_feats, gcross_feats)
 
-        qfeats = qfeats / qfeats.norm(dim=1, keepdim=True)
-        gfeats = gfeats / gfeats.norm(dim=1, keepdim=True)
-        sim_mat = torch.matmul(gfeats, qfeats.T)
-        # sim_mat = sim_mat / (self.feat_dim ** 0.5)
+            # l2-normalize
+            qfeats, qself_feats, qcross_feats = \
+                apply_all(normalize, qfeats, qself_feats, qcross_feats)
+            gfeats, gself_feats, gcross_feats = \
+                apply_all(normalize, gfeats, gself_feats, gcross_feats)
+
+        if eval_avg_sim:
+            sim_mat = torch.stack([
+                torch.matmul(gfeats, qfeats.T),
+                torch.matmul(gself_feats, qself_feats.T),
+                torch.matmul(gcross_feats, qcross_feats.T)
+            ], dim=0).mean(dim=0)
+        else:
+            sim_mat = torch.matmul(gfeats, qfeats.T)
 
         if self.training:
             assert qlabels is not None
@@ -254,16 +286,56 @@ class DecoderGraph(nn.Module):
         gfeats = gfeats.view(-1, 1, self.feat_dim)
 
         for layer in self.heads:
-            qfeats, gfeats = \
-                layer(qfeats, gfeats), layer(gfeats, qfeats)
+            qouts, gouts = layer(qfeats, gfeats), layer(gfeats, qfeats)
+            qfeats, qself_feats, qcross_feats = qouts
+            gfeats, gself_feats, gcross_feats = gouts
 
-        # reshape back
-        qfeats = qfeats.view(-1, self.feat_dim)
-        gfeats = gfeats.view(-1, self.feat_dim)
+            # reshape back
+            qfeats, qself_feats, qcross_feats = \
+                apply_all(reshape_back, qfeats, qself_feats, qcross_feats)
+            gfeats, gself_feats, gcross_feats = \
+                apply_all(reshape_back, gfeats, gself_feats, gcross_feats)
 
-        qfeats = qfeats / qfeats.norm(dim=1, keepdim=True)
-        gfeats = gfeats / gfeats.norm(dim=1, keepdim=True)
-        return gfeats, qfeats
+            # l2-normalize
+            qfeats, qself_feats, qcross_feats = \
+                apply_all(normalize, qfeats, qself_feats, qcross_feats)
+            gfeats, gself_feats, gcross_feats = \
+                apply_all(normalize, gfeats, gself_feats, gcross_feats)
+
+        return [qfeats, qself_feats, qcross_feats], \
+            [gfeats, gself_feats, gcross_feats]
+
+
+class AttnGraphLayer(nn.Module):
+    def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.0):
+        super(AttnGraphLayer, self).__init__()
+        self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
+        self.multihead_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
+        # Implementation of Feedforward model
+        self.linear1 = nn.Linear(d_model, dim_feedforward)
+        self.dropout = nn.Dropout(dropout)
+        self.linear2 = nn.Linear(dim_feedforward, d_model)
+
+        self.norm1 = nn.LayerNorm(d_model)
+        self.norm2 = nn.LayerNorm(d_model)
+        self.norm3 = nn.LayerNorm(d_model)
+        self.dropout1 = nn.Dropout(dropout)
+        self.dropout2 = nn.Dropout(dropout)
+        self.dropout3 = nn.Dropout(dropout)
+
+        self.activation = F.relu
+
+    def forward(self, tgt, memory):
+        self_feat = self.self_attn(tgt, tgt, tgt)[0]
+        tgt = tgt + self.dropout1(self_feat)
+        tgt = self.norm1(tgt)
+        cross_feat = self.multihead_attn(tgt, memory, memory)[0]
+        tgt = tgt + self.dropout2(cross_feat)
+        tgt = self.norm2(tgt)
+        tgt2 = self.linear2(self.dropout(self.activation(self.linear1(tgt))))
+        tgt = tgt + self.dropout3(tgt2)
+        tgt = self.norm3(tgt)
+        return tgt, self_feat, cross_feat
 
 
 # ------------------------------ Image LUT ---------------------------------
