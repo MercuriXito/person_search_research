@@ -586,6 +586,36 @@ class AggregatedPSEvaluator(PersonSearchEvaluator):
         return scores
 
 
+class PseudoGraphEvaluator(GraphPSEvaluator):
+    """ Pseudo Graph similarity based on the averaged similarity of all surrounding persons.
+    """
+    def get_similarity(
+            self, gallery_feat, query_feat, use_context, graph_thred, **eval_kwargs):
+
+        if len(query_feat.shape) == 1:
+            query_feat = query_feat.reshape(1, -1)
+        if len(gallery_feat.shape) == 1:
+            gallery_feat = gallery_feat.reshape(1, -1)
+
+        rep_gfeats = np.mean(gallery_feat, axis=0)
+        rep_qfeats = np.mean(query_feat, axis=0)
+        cross_sim = np.matmul(rep_qfeats, rep_gfeats.T)
+
+        idx = -1
+        query_context_feat = query_feat[:idx, :]
+        query_target_feat = query_feat[idx, :][None]
+        indv_scores = np.matmul(gallery_feat, query_target_feat.T)
+
+        final_scores = indv_scores * (1 - graph_thred) + cross_sim * graph_thred
+
+        # split scores
+        final_scores = torch.as_tensor(final_scores)
+        final_scores_softmax = torch.softmax(final_scores, 0)
+        final_scores = final_scores_softmax * final_scores / final_scores_softmax.max()
+        final_scores = np.array(final_scores.cpu())
+        return final_scores
+
+
 def build_evaluator(dataset, eval_method, model=None, device=None):
     if eval_method == "graph":
         assert model is not None

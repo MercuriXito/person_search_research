@@ -56,7 +56,9 @@ def evaluate_dense():
     b_extractor = FasterRCNNExtractor(baseline, device)
     g_extractor = FasterRCNNExtractor(graph, device)
     b_evaluator = PersonSearchEvaluator(args.dataset_file)
-    g_evaluator = GraphPSEvaluator(graph.graph_head, device, args.dataset_file)
+    g_evaluator = GraphPSEvaluator(
+        graph.graph_head, device, args.dataset_file,
+        eval_all_sim=g_args.eval.eval_all_sim)
 
     table = PrettyTable(field_names=[
         "item", "model", "det_ap", "det_recall",
@@ -73,20 +75,21 @@ def evaluate_dense():
             print("Thresh {} not enough querys".format(thresh))
             continue
 
+        b_args.defrost()
+
         # performance of baseline
         # 1. with CMM.
-        b_args.defrost()
-        eval_args = deepcopy(b_args.eval)
+        # eval_args = deepcopy(b_args.eval)
 
-        eval_args.eval_context = True
-        eval_args.graph_thresh = 0.4
-        res, _ = evaluate(b_extractor, eval_args, imdb=imdb, ps_evaluator=b_evaluator)
-        baseline_res = res["eval_res"]
-        format_eval_res = ["{:.8f}".format(res_item) for res_item in baseline_res]
-        format_eval_res = [f"{thresh:.2f}", f"baseline:CMM{eval_args.graph_thresh}"] + format_eval_res
-        table.add_row(format_eval_res)
+        # eval_args.eval_context = True
+        # eval_args.graph_thresh = 0.4
+        # res, _ = evaluate(b_extractor, eval_args, imdb=imdb, ps_evaluator=b_evaluator)
+        # baseline_res = res["eval_res"]
+        # format_eval_res = ["{:.8f}".format(res_item) for res_item in baseline_res]
+        # format_eval_res = [f"{thresh:.2f}", f"baseline:CMM{eval_args.graph_thresh}"] + format_eval_res
+        # table.add_row(format_eval_res)
 
-        # 2. w/o CMM
+        # # 2. w/o CMM
         eval_args.eval_context = False
         eval_args.graph_thresh = 0.0
         res, _ = evaluate(

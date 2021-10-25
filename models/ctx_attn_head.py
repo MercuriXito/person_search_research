@@ -24,6 +24,10 @@ def apply_all(func, *args):
     return res
 
 
+def mul(t1, t2):
+    return torch.matmul(t1, t2.T)
+
+
 # ------------------------------ Graph Head ---------------------------------
 def build_graph_head(*args, **kwargs):
     graph_module = DecoderGraph(*args, **kwargs)
@@ -241,6 +245,10 @@ class DecoderGraph(nn.Module):
         # reshape to sequence-like input
         qfeats = qfeats.view(-1, 1, self.feat_dim)
         gfeats = gfeats.view(-1, 1, self.feat_dim)
+
+        # # HACK: detach configuration
+        # qfeats = qfeats.detach()
+        # gfeats = gfeats.detach()
 
         for layer in self.heads:
             qouts, gouts = layer(qfeats, gfeats), layer(gfeats, qfeats)

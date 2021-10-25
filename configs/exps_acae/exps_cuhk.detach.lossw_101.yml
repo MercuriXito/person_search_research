@@ -1,0 +1,12 @@
+# experiments:
+# - CUHK-SYSU; 
+# - w/ ACAE
+# - lossw_101; 
+# detach (HACK settings)
+
+train:
+  output_dir: exps/exps_acae/exps_cuhk.detach.lossw_101
+  batch_size: 2
+  loss_weights:
+    loss_graph: 0.1
+
