@@ -12,7 +12,8 @@ from torch import optim
 from torch.utils.data.dataloader import DataLoader
 from torch.utils.data.sampler import RandomSampler, BatchSampler
 
-from models.baseline import build_faster_rcnn_based_models
+# from models.baseline import build_faster_rcnn_based_models
+from models.baseline_fpn import build_faster_rcnn_based_models
 from datasets import build_trainset
 import utils.misc as utils
 from utils.logger import MetricLogger
@@ -61,7 +62,7 @@ def train_one_epoch(
         optimizer.step()
 
         metric_logger.update(**loss_dict)
-        metric_logger.update(loss=sum(list(loss_dict.values())).item())
+        metric_logger.update(loss=losses.item())
         metric_logger.update(grad_norm=grad_total_norm)
         torch.cuda.empty_cache()
     print("Averaged stats:", metric_logger)

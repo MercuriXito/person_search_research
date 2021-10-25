@@ -74,7 +74,9 @@ def draw_boxes(image, boxes, save_path):
     cv2.imwrite(save_path, image)
 
 
-def draw_boxes_text(image, boxes, str_texts=None, name=""):
+def draw_boxes_text(
+        image, boxes, str_texts=None, name="",
+        write_output=False):
 
     if isinstance(image, torch.Tensor):
         assert image.ndim == 3
@@ -100,11 +102,14 @@ def draw_boxes_text(image, boxes, str_texts=None, name=""):
             get_random_colors(i), 2
         )
         cv2.putText(cimage, text, (x1, y1), 0, 1, get_random_colors(i), 2)
-    if len(name) == 0:
-        time_string = time.strftime("%H-%M-%S", time.localtime())
-        cv2.imwrite("outputs/{}.png".format(time_string), cimage)
-    else:
-        cv2.imwrite(name, cimage)
+
+    if write_output:
+        if len(name) == 0:
+            time_string = time.strftime("%H-%M-%S", time.localtime())
+            cv2.imwrite("outputs/{}.png".format(time_string), cimage)
+        else:
+            cv2.imwrite(name, cimage)
+    return cimage
 
 
 if __name__ == '__main__':

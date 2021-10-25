@@ -7,8 +7,8 @@ from datasets.transforms import get_transform
 sys.path.append("./")
 
 
-def build_trainset(dataset_name, root):
-    transform = get_transform(True)
+def build_trainset(dataset_name, root, use_transform=True):
+    transform = get_transform(use_transform)
     if dataset_name == "cuhk-sysu":
         imdb = CUHK_SYSU(root, transform, "train")
     elif dataset_name == "prw":
