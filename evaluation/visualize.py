@@ -1,11 +1,12 @@
 import numpy as np
 import random
+from numpy.core.numeric import cross
 import torch
 from datasets import load_eval_datasets
 from datasets.cuhk_sysu import CUHK_SYSU
 from evaluation.eval import FasterRCNNExtractor, evaluate
 from evaluation.eval_defaults import build_and_load_from_dir
-from evaluation.evaluator import PseudoGraphEvaluator
+from evaluation.evaluator import GraphPSEvaluator, PseudoGraphEvaluator
 import PIL.Image as Image
 import cv2
 
@@ -18,9 +19,58 @@ from scipy.io import loadmat
 from utils.vis import draw_boxes_text
 
 
+class SPseudoGraphEvaluator(GraphPSEvaluator):
+    def get_similarity(
+            self, gallery_feat, query_feat, use_context, graph_thred, **eval_kwargs):
+
+        if len(query_feat.shape) == 1:
+            query_feat = query_feat.reshape(1, -1)
+        if len(gallery_feat.shape) == 1:
+            gallery_feat = gallery_feat.reshape(1, -1)
+
+        idx = -1
+        query_context_feat = query_feat[:idx, :]
+        query_target_feat = query_feat[idx, :][None]
+        indv_scores = np.matmul(gallery_feat, query_target_feat.T)
+
+        qfeats, gfeats = query_feat, gallery_feat
+
+        from IPython import embed
+        embed()
+
+        # example for producing the ground-truth
+        cross_sim = np.matmul(qfeats, gfeats.T)
+        M, N = cross_sim.shape
+
+        ginds = cross_sim.argmax(axis=1)
+        req_feats = gfeats[ginds]
+        q_attn_weights = np.matmul(qfeats.reshape(M, 1, -1), req_feats.reshape(M, -1, 1))
+        q_attn_weights = q_attn_weights.reshape(M, 1)
+        q_agg_feats = np.mean(q_attn_weights * qfeats, axis=0, keepdims=True)
+
+        qinds = cross_sim.argmax(axis=0)
+        reg_feats = qfeats[qinds]
+        g_attn_weights = np.matmul(gfeats.reshape(N, 1, -1), reg_feats.reshape(N, -1, 1))
+        g_attn_weights = g_attn_weights.reshape(N, 1)
+        g_agg_feats = np.mean(g_attn_weights * gfeats, axis=0, keepdims=True)
+
+        cross_sim = np.matmul(q_agg_feats, g_agg_feats.T).flatten()
+
+        final_scores = indv_scores * (1 - graph_thred) + cross_sim * graph_thred
+
+        # split scores
+        final_scores = torch.as_tensor(final_scores)
+        final_scores_softmax = torch.softmax(final_scores, 0)
+        final_scores = final_scores_softmax * final_scores / final_scores_softmax.max()
+        final_scores = np.array(final_scores.cpu())
+        return final_scores
+
+
+
 def select_samples(dataset: CUHK_SYSU, seed=42):
     """ select random triple pair (query, pos_gallery, neg_gallery).
     """
+    seed = 50
     random.seed(seed)
 
     gallery_size = 100
@@ -100,13 +150,19 @@ if __name__ == '__main__':
 
     eval_args = args.eval
     extractor = FasterRCNNExtractor(net, device)
-    ps_evaluator = PseudoGraphEvaluator(
+    # ps_evaluator = PseudoGraphEvaluator(
+    #     net.graph_head, device, eval_args.dataset_file,
+    #     eval_all_sim=eval_args.eval_all_sim)
+    # ps_evaluator = GraphPSEvaluator(net.graph_head, device)
+    ps_evaluator = SPseudoGraphEvaluator(
         net.graph_head, device, eval_args.dataset_file,
         eval_all_sim=eval_args.eval_all_sim)
 
     res_pkl, table_string = evaluate(extractor, eval_args, ps_evaluator=ps_evaluator, res_pkl=res_pkl)
     querys = dataset.probes
     gallerys = dataset.roidb
+
+    exit(0)
 
     tbox = query_boxes[query_idx]
     pboxes = [gallery_boxes[pos_idx], gallery_boxes[neg_idx]]
@@ -118,32 +174,31 @@ if __name__ == '__main__':
     qimage = np.asarray(Image.open(img_path))
     vis_res = draw_boxes_text(qimage, tbox, str_texts=indices_text)
     vis_res = cv2.cvtColor(vis_res, cv2.COLOR_RGB2BGR)
-    cv2.imwrite("exps/vis/query.png", vis_res)
+    cv2.imwrite("exps/vis/visualize/query.png", vis_res)
 
     # gallery image
     for i, idx in enumerate([pos_idx, neg_idx]):
         pbox = pboxes[i]
         prefix = pprefix[i]
         indices_text = [f"{i}" for i in range(len(pbox))]
-        img_path = gallerys[pos_idx]["path"]
+        img_path = gallerys[idx]["path"]
         gimage = np.asarray(Image.open(img_path))
         vis_res = draw_boxes_text(gimage, pbox, str_texts=indices_text)
         vis_res = cv2.cvtColor(vis_res, cv2.COLOR_RGB2BGR)
-        cv2.imwrite(f"exps/vis/gallery_{prefix}.png", vis_res)
+        cv2.imwrite(f"exps/vis/visualize/gallery_{prefix}.png", vis_res)
 
     # visualize bounding boxes
-    # net.graph_head.inference()
 
-    # qfeats = query_features[query_idx]
-    # gfeats = gallery_features[pos_idx]
-    # neg_gfeats = gallery_features[neg_idx]
+    qfeats = query_features[query_idx]
+    gfeats = gallery_features[pos_idx]
+    neg_gfeats = gallery_features[neg_idx]
 
-    # new_sim = net.graph_head.graph_head.forward(
-    #     torch.as_tensor(qfeats),
-    #     torch.as_tensor(gfeats)
-    # )
+    new_sim = net.graph_head.graph_head.forward(
+        torch.as_tensor(qfeats).to(device),
+        torch.as_tensor(gfeats).to(device)
+    )
 
-    # neg_sim = net.graph_head.graph_head.forward(
-    #     torch.as_tensor(qfeats),
-    #     torch.as_tensor(neg_gfeats)
-    # )
+    neg_sim = net.graph_head.graph_head.forward(
+        torch.as_tensor(qfeats).to(device),
+        torch.as_tensor(neg_gfeats).to(device)
+    )
