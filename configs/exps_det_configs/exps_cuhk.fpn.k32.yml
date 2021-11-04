@@ -1,0 +1,12 @@
+# K-Sampling Strategy: k=32
+#
+
+model:
+  roi_head:
+      k_sampling: true
+      k: 32
+train:
+  output_dir: exps/exps_det/exps_cuhk.fpn.k32
+  batch_size: 2
+  epochs: 20
+

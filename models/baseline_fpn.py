@@ -6,12 +6,11 @@ from torchvision.models.detection.transform import GeneralizedRCNNTransform
 from torchvision.models.detection.rpn import AnchorGenerator, RegionProposalNetwork, RPNHead
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.ops import MultiScaleRoIAlign
-from torchvision.models.detection.roi_heads import RoIHeads, fastrcnn_loss
-from torchvision.ops import boxes as box_ops
 
 from models.losses import OIMLoss
 from models.reid_head import ReIDEmbeddingHead
 from models.backbone import build_faster_rcnn_based_multi_scale_backbone
+from models.baseline import PSRoIHead
 
 
 class BaseFPNNet(GeneralizedRCNN):
@@ -163,256 +162,6 @@ class BaseFPNNet(GeneralizedRCNN):
         return embeddings
 
 
-class PSRoIHead(RoIHeads):
-    """ Additional Branch for person search output.
-    """
-    def __init__(
-            self,
-            box_roi_pool,
-            box_head,
-            box_predictor,
-            reid_embed_head,
-            oim_loss,
-            reid_feature_dim=256,
-            graph_head=None,
-            # other Faster-RCNN parameters
-            *args, **kwargs):
-        super(PSRoIHead, self).__init__(
-            box_roi_pool, box_head, box_predictor,
-            *args, **kwargs)
-        self.oim_loss = oim_loss
-        self.reid_feature_dim = reid_feature_dim
-        self.reid_embed_head = reid_embed_head
-        self.graph_head = graph_head
-
-    def forward(self,
-                features,      # type: Dict[str, Tensor]
-                proposals,     # type: List[Tensor]
-                image_shapes,  # type: List[Tuple[int, int]]
-                targets=None   # type: Optional[List[Dict[str, Tensor]]]
-                ):
-        """
-        Arguments:
-            features (List[Tensor])
-            proposals (List[Tensor[N, 4]])
-            image_shapes (List[Tuple[H, W]])
-            targets (List[Dict])
-        """
-
-        if self.training:
-            proposals, _, labels, regression_targets, pid_labels\
-                = self.select_training_samples(proposals, targets)
-        else:
-            labels = None
-            regression_targets = None
-
-        box_features = self.box_roi_pool(features, proposals, image_shapes)
-        box_features = self.box_head(box_features)
-        embeddings, norms = self.reid_embed_head(box_features)
-        pred_boxes_features = box_features["feat_res5"]
-        class_logits, box_regression = self.box_predictor(pred_boxes_features)
-
-        result = []
-        losses = {}
-        if self.training:
-            assert labels is not None and regression_targets is not None
-            loss_classifier, loss_box_reg = fastrcnn_loss(
-                class_logits, box_regression, labels, regression_targets)
-            loss_oim = self.oim_loss(embeddings, pid_labels)
-            boxes = self.box_coder.decode(box_regression, proposals)
-            pred_scores = F.softmax(class_logits, -1)
-
-            # postprocess training outputs
-            num_persons_per_images = [len(proposal) for proposal in proposals]
-            embedding_list = embeddings.split(num_persons_per_images, 0)
-            box_list = boxes.split(num_persons_per_images, 0)
-            norm_list = norms.split(num_persons_per_images, 0)
-            scores_list = pred_scores.split(num_persons_per_images, 0)
-            losses = {
-                "loss_classifier": loss_classifier,
-                "loss_box_reg": loss_box_reg,
-                "loss_oim": loss_oim,
-            }
-            num_images = len(num_persons_per_images)
-            for idx in range(num_images):
-                result.append({
-                    "pid_labels": pid_labels[idx],
-                    "labels": labels[idx],
-                    "embeddings": embedding_list[idx],
-                    "boxes": box_list[idx],
-                    "norm": norm_list[idx],
-                    "scores": scores_list[idx]
-                })
-        else:
-            boxes, scores, labels, embeddings, norms = self.postprocess_detections(
-                class_logits, box_regression, proposals,
-                embeddings, norms, image_shapes)
-            num_images = len(boxes)
-            for i in range(num_images):
-                result.append(
-                    {
-                        "boxes": boxes[i],
-                        "labels": labels[i],
-                        "scores": scores[i],
-                        "embeddings": embeddings[i],
-                        "norm": norms[i],
-                    }
-                )
-
-        return result, losses
-
-    def select_training_samples(self, proposals, targets):
-        self.check_targets(targets)
-        assert targets is not None
-        dtype = proposals[0].dtype
-        device = proposals[0].device
-
-        gt_boxes = [t["boxes"].to(dtype) for t in targets]
-        gt_labels = [t["labels"] for t in targets]
-        gt_pid_labels = [t["pid_labels"] for t in targets]
-
-        proposals = self.add_gt_proposals(proposals, gt_boxes)
-
-        # get matching gt indices for each proposal
-        # mind the size of labels and pid_labels is the same with proposals.
-        matched_idxs, labels, pid_labels = \
-            self.assign_targets_to_proposals(proposals, gt_boxes, gt_labels, gt_pid_labels)
-        # sample a fixed proportion of positive-negative proposals
-        sampled_inds = self.subsample(labels)
-        matched_gt_boxes = []
-        num_images = len(proposals)
-        for img_id in range(num_images):
-            img_sampled_inds = sampled_inds[img_id]
-            proposals[img_id] = proposals[img_id][img_sampled_inds]
-            labels[img_id] = labels[img_id][img_sampled_inds]
-            matched_idxs[img_id] = matched_idxs[img_id][img_sampled_inds]
-            pid_labels[img_id] = pid_labels[img_id][img_sampled_inds]
-
-            gt_boxes_in_image = gt_boxes[img_id]
-            if gt_boxes_in_image.numel() == 0:
-                gt_boxes_in_image = torch.zeros((1, 4), dtype=dtype, device=device)
-            matched_gt_boxes.append(gt_boxes_in_image[matched_idxs[img_id]])
-
-        regression_targets = self.box_coder.encode(matched_gt_boxes, proposals)
-        return proposals, matched_idxs, labels, regression_targets, pid_labels
-
-    def assign_targets_to_proposals(self, proposals, gt_boxes, gt_labels, gt_pid_labels):
-        matched_idxs = []
-        labels = []
-        pid_labels = []
-        for proposals_in_image, gt_boxes_in_image, gt_labels_in_image, gt_pid_labels_in_image\
-             in zip(proposals, gt_boxes, gt_labels, gt_pid_labels):
-
-            if gt_boxes_in_image.numel() == 0:
-                # Background image
-                device = proposals_in_image.device
-                clamped_matched_idxs_in_image = torch.zeros(
-                    (proposals_in_image.shape[0],), dtype=torch.int64, device=device
-                )
-                labels_in_image = torch.zeros(
-                    (proposals_in_image.shape[0],), dtype=torch.int64, device=device
-                )
-                pid_labels_in_image = torch.zeros(
-                    (proposals_in_image.shape[0],), dtype=torch.int64, device=device
-                )
-            else:
-                # set to self.box_similarity when https://github.com/pytorch/pytorch/issues/27495 lands
-                match_quality_matrix = box_ops.box_iou(gt_boxes_in_image, proposals_in_image)
-                matched_idxs_in_image = self.proposal_matcher(match_quality_matrix)
-
-                clamped_matched_idxs_in_image = matched_idxs_in_image.clamp(min=0)
-
-                labels_in_image = gt_labels_in_image[clamped_matched_idxs_in_image]
-                labels_in_image = labels_in_image.to(dtype=torch.int64)
-                pid_labels_in_image = gt_pid_labels_in_image[clamped_matched_idxs_in_image]
-                pid_labels_in_image = pid_labels_in_image.to(dtype=torch.int64)
-
-                # Label background (below the low threshold)
-                bg_inds = matched_idxs_in_image == self.proposal_matcher.BELOW_LOW_THRESHOLD
-                labels_in_image[bg_inds] = 0
-                pid_labels_in_image[bg_inds] = 0
-
-                # Label ignore proposals (between low and high thresholds)
-                ignore_inds = matched_idxs_in_image == self.proposal_matcher.BETWEEN_THRESHOLDS
-                labels_in_image[ignore_inds] = -1  # -1 is ignored by sampler
-                pid_labels_in_image[ignore_inds] = -1
-
-            matched_idxs.append(clamped_matched_idxs_in_image)
-            labels.append(labels_in_image)
-            pid_labels.append(pid_labels_in_image)
-        return matched_idxs, labels, pid_labels
-
-    def postprocess_detections(self,
-                               class_logits,    # type: Tensor
-                               box_regression,  # type: Tensor
-                               proposals,       # type: List[Tensor]
-                               embeddings,      # type: Tensor
-                               norms,           # type: Tensor
-                               image_shapes     # type: List[Tuple[int, int]]
-                               ):
-        # type: (...) -> Tuple[List[Tensor], List[Tensor], List[Tensor]]
-        device = class_logits.device
-        num_classes = class_logits.shape[-1]
-
-        boxes_per_image = [boxes_in_image.shape[0] for boxes_in_image in proposals]
-        pred_boxes = self.box_coder.decode(box_regression, proposals)
-
-        pred_scores = F.softmax(class_logits, -1)
-
-        pred_boxes_list = pred_boxes.split(boxes_per_image, 0)
-        pred_scores_list = pred_scores.split(boxes_per_image, 0)
-        pred_embedding_list = embeddings.split(boxes_per_image, 0)
-        pred_norm_list = norms.split(boxes_per_image, 0)
-
-        all_boxes = []
-        all_scores = []
-        all_labels = []
-        all_embeddings = []
-        all_norms = []
-        for boxes, scores, embedding, norm, image_shape in \
-            zip(pred_boxes_list, pred_scores_list, pred_embedding_list, pred_norm_list, image_shapes):
-            boxes = box_ops.clip_boxes_to_image(boxes, image_shape)
-
-            # create labels for each prediction
-            labels = torch.arange(num_classes, device=device)
-            labels = labels.view(1, -1).expand_as(scores)
-
-            # remove predictions with the background label
-            boxes = boxes[:, 1:]
-            scores = scores[:, 1:]
-            labels = labels[:, 1:]
-
-            # batch everything, by making every class prediction be a separate instance
-            boxes = boxes.reshape(-1, 4)
-            scores = scores.reshape(-1)
-            labels = labels.reshape(-1)
-
-            # remove low scoring boxes
-            inds = torch.nonzero(scores > self.score_thresh).squeeze(1)
-            boxes, scores, labels = boxes[inds], scores[inds], labels[inds]
-            embedding, norm = embedding[inds], norm[inds]
-
-            # remove empty boxes
-            keep = box_ops.remove_small_boxes(boxes, min_size=1e-2)
-            boxes, scores, labels = boxes[keep], scores[keep], labels[keep]
-            embedding, norm = embedding[keep], norm[keep]
-
-            # non-maximum suppression, independently done per class
-            keep = box_ops.batched_nms(boxes, scores, labels, self.nms_thresh)
-            # keep only topk scoring predictions
-            keep = keep[:self.detections_per_img]
-            boxes, scores, labels = boxes[keep], scores[keep], labels[keep]
-            embedding, norm = embedding[keep], norm[keep]
-
-            all_boxes.append(boxes)
-            all_scores.append(scores)
-            all_labels.append(labels)
-            all_embeddings.append(embedding)
-            all_norms.append(norm)
-
-        return all_boxes, all_scores, all_labels, all_embeddings, all_norms
-
-
 def build_faster_rcnn_based_models(args):
 
     min_size = 800
@@ -446,6 +195,8 @@ def build_faster_rcnn_based_models(args):
     box_score_thresh = args.model.roi_head.score_thresh_test
     box_nms_thresh = args.model.roi_head.nms_thresh_test
     box_detections_per_img = args.model.roi_head.detections_per_image_test
+    roi_use_ksampling = args.model.roi_head.k_sampling
+    roi_use_k = args.model.roi_head.k
 
     # model parameters
     use_multi_scale = args.model.use_multi_scale
@@ -514,18 +265,6 @@ def build_faster_rcnn_based_models(args):
             featmap_names=['feat_res5'], in_channels=[256],
             dim=reid_feature_dim, feature_norm=True)
 
-    # # build context attention head.
-    # use_graph = args.model.roi_head.graph_head.use_graph
-    # if use_graph:
-    #     graph_head = ContextGraphHead(
-    #         reid_feature_dim=256,
-    #         num_stack=args.model.roi_head.graph_head.num_graph_stack,
-    #         nheads=args.model.roi_head.graph_head.nheads,
-    #         dropout=args.model.roi_head.graph_head.dropout,
-    #     )
-    # else:
-    #     graph_head = None
-
     roi_head = PSRoIHead(
         box_roi_pool, box_head, box_predictor,
         reid_head, oim_loss,
@@ -535,6 +274,9 @@ def build_faster_rcnn_based_models(args):
         batch_size_per_image=box_batch_size_per_image,
         positive_fraction=box_positive_fraction,
         bbox_reg_weights=bbox_reg_weights,
+        # Sampling parameters,
+        k_sampling=roi_use_ksampling,
+        k=roi_use_k,
         # RoIHead inference parameters
         score_thresh=box_score_thresh,
         nms_thresh=box_nms_thresh,

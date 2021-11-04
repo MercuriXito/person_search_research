@@ -64,6 +64,10 @@ _C.model.roi_head.nms_thresh_test = 0.4
 # Maximum number of detected objects
 _C.model.roi_head.detections_per_image_test = 300
 
+# K-Sampling Strategies in training RoI Head.
+_C.model.roi_head.k_sampling = False
+_C.model.roi_head.k = 16
+
 # -------------------------------------------------------- #
 #             Additional Contex Graph Head                 #
 # -------------------------------------------------------- #

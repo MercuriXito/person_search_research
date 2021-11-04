@@ -1,0 +1,8 @@
+# BN in backbone: HACK settings
+# Enable The training of layer1 in ResNet50: HACK setttings
+
+train:
+  output_dir: exps/exps_det/exps_cuhk.fpn.layer1
+  batch_size: 2
+
+

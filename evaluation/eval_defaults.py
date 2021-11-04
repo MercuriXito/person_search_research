@@ -3,7 +3,8 @@ import os
 from models.graph_net import build_graph_net
 
 from utils.misc import pickle
-from models.baseline import build_faster_rcnn_based_models
+# from models.baseline import build_faster_rcnn_based_models
+from models.baseline_fpn import build_faster_rcnn_based_models
 from configs.faster_rcnn_default_configs import get_default_cfg
 from evaluation.eval import FasterRCNNExtractor, evaluate
 from evaluation.evaluator import PersonSearchEvaluator

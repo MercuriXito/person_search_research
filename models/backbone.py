@@ -274,10 +274,10 @@ def build_faster_rcnn_based_multi_scale_backbone(
     backbone.bn1.weight.requires_grad_(False)
     backbone.bn1.bias.requires_grad_(False)
 
-    # freeze the layer1
-    for name, param in backbone.named_parameters():
-        if name.startswith("layer1"):
-            param.requires_grad_(False)
+    # # freeze the layer1
+    # for name, param in backbone.named_parameters():
+    #     if name.startswith("layer1"):
+    #         param.requires_grad_(False)
 
     # split_stem = Backbone(backbone)
     # head = RCNNConvHead(backbone, return_res4, GAP)
