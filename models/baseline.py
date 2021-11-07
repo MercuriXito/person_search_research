@@ -314,7 +314,6 @@ class PSRoIHead(RoIHeads):
         return proposals, matched_idxs, labels, regression_targets, pid_labels
 
     def k_sampling(self, labels):
-        self.k = 16
         sample_inds = []
         for img_in_labels in labels:
             ulabels = torch.unique(img_in_labels)
