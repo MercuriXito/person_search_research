@@ -23,7 +23,9 @@ def main():
 
     device = torch.device(eval_args.device)
     extractor = FasterRCNNExtractor(model, device)
-    ps_evaluator = GraphPSEvaluator(model.graph_head, device, eval_args.dataset_file)
+    ps_evaluator = GraphPSEvaluator(
+        model.graph_head, device, eval_args.dataset_file,
+        eval_all_sim=eval_args.eval_all_sim)
     res_pkl, table_string = evaluate(extractor, eval_args, ps_evaluator=ps_evaluator)
 
     # serealization

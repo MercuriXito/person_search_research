@@ -184,7 +184,7 @@ def evaluate(extractor, args, imdb=None, ps_evaluator=None, res_pkl=None):
         gallery_features = res_pkl["gallery_features"]
         gallery_boxes = res_pkl["gallery_boxes"]
         query_boxes = res_pkl["query_boxes"]
-    elif len(use_data) > 0 and os.path.exists(use_data):
+    elif use_data is not None and len(use_data) > 0 and os.path.exists(use_data):
         data = unpickle(use_data)
         print("load ok.")
         query_features = data["query_features"]

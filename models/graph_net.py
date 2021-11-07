@@ -233,6 +233,7 @@ if __name__ == '__main__':
     #     draw_boxes_text(img, boxes)
 
     model = build_graph_net(args)
+    # model.load_state_dict(torch.load("exps/exps_cuhk.graph/checkpoint.pth", map_location="cpu")["model"])
     model.to(device)
 
     # model.eval()

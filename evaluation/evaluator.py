@@ -489,14 +489,20 @@ class GraphPSEvaluator(PersonSearchEvaluator):
     """ Evaluator adapted for ACAE branch, which differs from original evaluator
     when getting the similarity.
     """
-    def __init__(self, graph_head, device, dataset_file="cuhk-sysu") -> None:
+    def __init__(self, graph_head, device, dataset_file="cuhk-sysu", **eval_kwargs) -> None:
         super().__init__(dataset_file)
         self.graph_head = graph_head
         self.device = device
         assert isinstance(self.graph_head, ContextGraphHead)
 
+        self.eval_all_sim = False
+        if "eval_all_sim" in eval_kwargs and eval_kwargs["eval_all_sim"] == True:
+            self.eval_all_sim = True
+            print("Eval all sim.")
+
     def get_similarity(
-            self, gallery_feat, query_feat, use_context, graph_thred):
+            self, gallery_feat, query_feat, use_context, graph_thred,
+            **eval_kwargs):
         if len(query_feat.shape) == 1:
             query_feat = query_feat.reshape(1, -1)
         if len(gallery_feat.shape) == 1:
@@ -520,7 +526,8 @@ class GraphPSEvaluator(PersonSearchEvaluator):
             query_target_feat = torch.as_tensor(query_target_feat).to(self.device)
             scores = self.graph_head.inference(
                 gallery_feat, query_context_feat, query_target_feat,
-                graph_thred=graph_thred
+                graph_thred=graph_thred,
+                eval_all_sim=self.eval_all_sim
             )
         scores = scores.cpu().numpy()
         return scores
@@ -589,7 +596,6 @@ class FastGraphPSEvaluator(GraphPSEvaluator):
             query_feat = query_feat.reshape(1, -1)
         if len(gallery_feat.shape) == 1:
             gallery_feat = gallery_feat.reshape(1, -1)
-
         # No CMM here
         query_target_feat = query_feat[-1].reshape(1, -1)
         return get_cosine_sim(gallery_feat, query_target_feat)
@@ -830,6 +836,34 @@ class FastGraphPSEvaluator(GraphPSEvaluator):
         top10 = accs[2]
 
         return mAP, top1, top5, top10, ret
+
+
+class PseudoGraphEvaluator(GraphPSEvaluator):
+    """ Pseudo Graph similarity based on the averaged similarity of all surrounding persons.
+    """
+    def get_similarity(
+            self, gallery_feat, query_feat, use_context, graph_thred, **eval_kwargs):
+        if len(query_feat.shape) == 1:
+            query_feat = query_feat.reshape(1, -1)
+        if len(gallery_feat.shape) == 1:
+            gallery_feat = gallery_feat.reshape(1, -1)
+        rep_gfeats = np.mean(gallery_feat, axis=0)
+        rep_qfeats = np.mean(query_feat, axis=0)
+        cross_sim = np.matmul(rep_qfeats, rep_gfeats.T)
+
+        idx = -1
+        query_context_feat = query_feat[:idx, :]
+        query_target_feat = query_feat[idx, :][None]
+        indv_scores = np.matmul(gallery_feat, query_target_feat.T)
+
+        final_scores = indv_scores * (1 - graph_thred) + cross_sim * graph_thred
+
+        # split scores
+        final_scores = torch.as_tensor(final_scores)
+        final_scores_softmax = torch.softmax(final_scores, 0)
+        final_scores = final_scores_softmax * final_scores / final_scores_softmax.max()
+        final_scores = np.array(final_scores.cpu())
+        return final_scores
 
 
 def build_evaluator(dataset, eval_method, model=None, device=None):

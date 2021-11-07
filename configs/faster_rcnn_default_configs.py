@@ -154,6 +154,7 @@ _C.eval.device = "cuda"
 _C.eval.dataset_file = "cuhk-sysu"
 _C.eval.dataset_path = "data/cuhk-sysu"
 _C.eval.eval_context = False
+_C.eval.eval_all_sim = False
 _C.eval.eval_method = "sim"  # proposed for future application.
 _C.eval.checkpoint = "checkpoint.pth"
 
