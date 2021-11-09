@@ -13,7 +13,7 @@ def reshape_back(x):
     return x.view(-1, x.size()[-1])
 
 
-def normalize(x, dim=1):
+def normalize(x, dim=2):
     return F.normalize(x, p=2, dim=dim)
 
 
@@ -255,17 +255,17 @@ class DecoderGraph(nn.Module):
             qfeats, qself_feats, qcross_feats = qouts
             gfeats, gself_feats, gcross_feats = gouts
 
-            # reshape back
-            qfeats, qself_feats, qcross_feats = \
-                apply_all(reshape_back, qfeats, qself_feats, qcross_feats)
-            gfeats, gself_feats, gcross_feats = \
-                apply_all(reshape_back, gfeats, gself_feats, gcross_feats)
-
             # l2-normalize
             qfeats, qself_feats, qcross_feats = \
                 apply_all(normalize, qfeats, qself_feats, qcross_feats)
             gfeats, gself_feats, gcross_feats = \
                 apply_all(normalize, gfeats, gself_feats, gcross_feats)
+
+        # reshape back
+        qfeats, qself_feats, qcross_feats = \
+            apply_all(reshape_back, qfeats, qself_feats, qcross_feats)
+        gfeats, gself_feats, gcross_feats = \
+            apply_all(reshape_back, gfeats, gself_feats, gcross_feats)
 
         if eval_avg_sim:
             sim_mat = torch.stack([
@@ -298,17 +298,17 @@ class DecoderGraph(nn.Module):
             qfeats, qself_feats, qcross_feats = qouts
             gfeats, gself_feats, gcross_feats = gouts
 
-            # reshape back
-            qfeats, qself_feats, qcross_feats = \
-                apply_all(reshape_back, qfeats, qself_feats, qcross_feats)
-            gfeats, gself_feats, gcross_feats = \
-                apply_all(reshape_back, gfeats, gself_feats, gcross_feats)
-
             # l2-normalize
             qfeats, qself_feats, qcross_feats = \
                 apply_all(normalize, qfeats, qself_feats, qcross_feats)
             gfeats, gself_feats, gcross_feats = \
                 apply_all(normalize, gfeats, gself_feats, gcross_feats)
+
+        # reshape back
+        qfeats, qself_feats, qcross_feats = \
+            apply_all(reshape_back, qfeats, qself_feats, qcross_feats)
+        gfeats, gself_feats, gcross_feats = \
+            apply_all(reshape_back, gfeats, gself_feats, gcross_feats)
 
         return [qfeats, qself_feats, qcross_feats], \
             [gfeats, gself_feats, gcross_feats]
