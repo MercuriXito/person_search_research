@@ -1,3 +1,4 @@
+from collections import defaultdict
 import numpy as np
 import torch
 import os.path as osp
@@ -587,8 +588,8 @@ class AggregatedPSEvaluator(PersonSearchEvaluator):
 
 
 class FastGraphPSEvaluator(GraphPSEvaluator):
-    def __init__(self, graph_head, device, dataset_file="cuhk-sysu", topk=200) -> None:
-        super().__init__(graph_head, device, dataset_file=dataset_file)
+    def __init__(self, graph_head, device, dataset_file="cuhk-sysu", topk=50, **kwargs) -> None:
+        super().__init__(graph_head, device, dataset_file=dataset_file, **kwargs)
         self.topk = topk
 
     def cosine_similarity(self, gallery_feat, query_feat):
@@ -712,6 +713,8 @@ class FastGraphPSEvaluator(GraphPSEvaluator):
                 sim = sim.flatten()
                 # assign label for each det
                 label = np.zeros(len(sim), dtype=np.int32)
+                # assign pidx for index
+                pindices = np.asarray([(gidx, pidx, 1) for pidx in range(len(feat_g))])
                 if gt.size > 0:
                     w, h = gt[2], gt[3]
                     gt[2:] += gt[:2]
@@ -723,14 +726,14 @@ class FastGraphPSEvaluator(GraphPSEvaluator):
                     sim = sim[inds]
                     det = det[inds]
                     box_true = box_true[inds]
+                    pindices = pindices[inds]
                     # only set the first matched det as true positive
                     for j, roi in enumerate(det[:, :4]):
                         if _compute_iou(roi, gt) >= iou_thresh:
                             label[j] = 1
                             count_tp += 1
                             break
-                person_indices.extend([
-                    (gidx, pidx, 1) for pidx in range(len(feat_g))])
+                person_indices.extend(list(pindices))
                 y_true.extend(list(label))
                 y_score.extend(list(sim))
                 y_true_box.extend(list(box_true))
@@ -761,21 +764,30 @@ class FastGraphPSEvaluator(GraphPSEvaluator):
                     imgs.extend([gallery_imname] * len(sim))
                     rois.extend(list(det))
 
-            # re-ranking based on graph similarity
+            # sort by cosine similarity
             y_score = np.asarray(y_score)
             inds = np.argsort(y_score)[::-1]
+
+            # re-ranking based on graph similarity
             person_indices = np.asarray(person_indices)
             graph_indices = person_indices[inds][:self.topk]
+            graph_sims = np.zeros((self.topk, ))
+            image_banks = defaultdict(list)
 
-            graph_sims = []
             for tidx in range(self.topk):
-                target_ind = graph_indices[tidx]
-                target_gimg, target_pidx, in_gallery = target_ind
-                if in_gallery == 1:
-                    item = protoc['Gallery'][si].squeeze()[target_gimg]
+                target_gimg, target_pidx, in_gallery = graph_indices[tidx]
+                image_banks[target_gimg].append([in_gallery, target_pidx, tidx])
+
+            # graph inference in image-level
+            for img_ind, persons_list in image_banks.items():
+                img_in_gallery = persons_list[0][0]
+                if img_in_gallery == 1:
+                    item = protoc['Gallery'][si].squeeze()[img_ind]
                     gallery_imname = str(item[0][0])
                 else:
-                    gallery_imname = gallery_set.imgs[target_gimg]
+                    gallery_imname = gallery_set.imgs[img_ind]
+                person_indices_in_imgs = np.asarray([pi[1] for pi in persons_list])
+                person_indices_in_ranking = np.asarray([pi[2] for pi in persons_list])
 
                 det, feat_g, box_true = name_to_det_feat[gallery_imname]
                 assert feat_g.size == np.prod(feat_g.shape[:2])
@@ -785,13 +797,16 @@ class FastGraphPSEvaluator(GraphPSEvaluator):
                     graph_thred=graph_thred
                 )
                 sim = sim.flatten()
-                target_person_sim = sim[target_pidx]
-                graph_sims.append(target_person_sim)
-            graph_sims = np.asarray(graph_sims)
+                graph_sims[person_indices_in_ranking] = sim[person_indices_in_imgs]
+
+            # ensure that topk elements are still topk.
+            max_cos_score = y_score[inds][self.topk]
+            min_graph_score = graph_sims.min()
+            graph_sims = graph_sims - min_graph_score + max_cos_score
             y_score[inds[:self.topk]] = graph_sims
 
             # 3. Compute AP for this probe (need to scale by recall rate)
-            y_score = np.asarray(y_score)
+            # y_score = np.asarray(y_score)
             y_true = np.asarray(y_true)
             y_true_box = np.asarray(y_true_box)
             assert count_tp <= count_gt
@@ -831,6 +846,197 @@ class FastGraphPSEvaluator(GraphPSEvaluator):
         ret['accs'] = accs
 
         mAP = np.mean(aps)
+        top1 = accs[0]
+        top5 = accs[1]
+        top10 = accs[2]
+
+        return mAP, top1, top5, top10, ret
+
+    def search_performance_by_sim_prw(
+                    self, gallery_set, probe_set,
+                    gallery_det, gallery_feat, probe_feat, *,
+                    det_thresh=0.5, gallery_size=-1, ignore_cam_id=True,
+                    use_context=False, graph_thred=0.0, **kwargs):
+        """
+        gallery_det (list of ndarray): n_det x [x1, x2, y1, y2, score] per image
+        gallery_feat (list of ndarray): n_det x D features per image
+        probe_feat (list of ndarray): D dimensional features per probe image
+
+        det_thresh (float): filter out gallery detections whose scores below this
+        gallery_size (int): -1 for using full set
+        ignore_cam_id (bool): Set to True acoording to CUHK-SYSU, 
+                                alyhough it's a common practice to focus on cross-cam match only. 
+        """
+        assert len(gallery_set) == len(gallery_det)
+        assert len(gallery_set) == len(gallery_feat)
+        assert len(probe_set) == len(probe_feat)
+
+        gt_roidb = gallery_set.record
+        name_to_det_feat = {}
+        for gt, det, feat in zip(gt_roidb, gallery_det, gallery_feat):
+            name = gt['im_name']
+            pids = gt['gt_pids']
+            cam_id = gt['cam_id']
+            scores = det[:, 4].ravel()
+            inds = np.where(scores >= det_thresh)[0]
+            if len(inds) > 0:
+                name_to_det_feat[name] = (det[inds], feat[inds], pids, cam_id)
+
+        aps = []
+        accs = []
+        topk = [1, 5, 10]
+        ret = {'image_root': gallery_set.data_path, 'results': []}
+        for i in tqdm(range(len(probe_set))):
+            y_true, y_score = [], []
+            imgs, rois = [], []
+            person_indices = []
+            count_gt, count_tp = 0, 0
+
+            feat_p = probe_feat[i]
+            probe_imname = probe_set[i]['im_name']
+            probe_roi = probe_set[i]['boxes']
+            probe_pid = probe_set[i]['gt_pids']
+            probe_cam = probe_set[i]['cam_id']
+
+            # Find all occurence of this probe
+            gallery_imgs = []
+            for x in gt_roidb:
+                if probe_pid in x['gt_pids'] and x['im_name'] != probe_imname:
+                    gallery_imgs.append(x)
+            probe_gts = {}
+            for item in gallery_imgs:
+                probe_gts[item['im_name']] = \
+                    item['boxes'][item['gt_pids'] == probe_pid]
+
+            # Construct gallery set for this probe
+            if ignore_cam_id:
+                gallery_imgs = []
+                for x in gt_roidb:
+                    if x['im_name'] != probe_imname:
+                        gallery_imgs.append(x)
+            else:
+                gallery_imgs = []
+                for x in gt_roidb:
+                    if x['im_name'] != probe_imname and x['cam_id'] != probe_cam:
+                        gallery_imgs.append(x)
+
+            # # 1. Go through all gallery samples
+            # for item in testset.targets_db:
+            # Gothrough the selected gallery
+            for gidx, item in enumerate(gallery_imgs):
+                gallery_imname = item['im_name']
+                # some contain the probe (gt not empty), some not
+                count_gt += (gallery_imname in probe_gts)
+                # compute distance between probe and gallery dets
+                if gallery_imname not in name_to_det_feat:
+                    continue
+                det, feat_g, _, _ = name_to_det_feat[gallery_imname]
+                # get L2-normalized feature matrix NxD
+                assert feat_g.size == np.prod(feat_g.shape[:2])
+                feat_g = feat_g.reshape(feat_g.shape[:2])
+                # get similarity
+                sim = self.cosine_similarity(feat_g, feat_p)
+                sim = sim.flatten()
+                # assign label for each det
+                label = np.zeros(len(sim), dtype=np.int32)
+                # assign pidx for index
+                pindices = np.asarray([[gidx, pidx] for pidx in range(len(feat_g))])
+                if gallery_imname in probe_gts:
+                    gt = probe_gts[gallery_imname].ravel()
+                    w, h = gt[2] - gt[0], gt[3] - gt[1]
+                    iou_thresh = min(0.5, (w * h * 1.0) /
+                                        ((w + 10) * (h + 10)))
+                    inds = np.argsort(sim)[::-1]
+                    sim = sim[inds]
+                    det = det[inds]
+                    pindices = pindices[inds]
+                    # only set the first matched det as true positive
+                    for j, roi in enumerate(det[:, :4]):
+                        if _compute_iou(roi, gt) >= iou_thresh:
+                            label[j] = 1
+                            count_tp += 1
+                            break
+                person_indices.extend(list(pindices))
+                y_true.extend(list(label))
+                y_score.extend(list(sim))
+                imgs.extend([gallery_imname] * len(sim))
+                rois.extend(list(det))
+
+            y_score = np.asarray(y_score)
+            inds = np.argsort(y_score)[::-1]
+
+            person_indices = np.asarray(person_indices)
+            graph_indices = person_indices[inds][:self.topk]
+            graph_sims = np.zeros((self.topk, ))
+            image_banks = defaultdict(list)
+
+            for tidx in range(self.topk):
+                target_gimg, target_pidx = graph_indices[tidx]
+                image_banks[target_gimg].append([target_pidx, tidx])
+
+            # graph inference in image-level
+            for img_ind, persons_list in image_banks.items():
+                item = gallery_imgs[img_ind]
+                gallery_imname = item["im_name"]
+
+                pinds = np.asarray(persons_list)
+                person_indices_in_imgs, person_indices_in_ranking = pinds.T
+
+                det, feat_g, _, _ = name_to_det_feat[gallery_imname]
+                assert feat_g.size == np.prod(feat_g.shape[:2])
+                feat_g = feat_g.reshape(feat_g.shape[:2])
+                sim = self.get_similarity(
+                    feat_g, feat_p, use_context=use_context,
+                    graph_thred=graph_thred
+                )
+                sim = sim.flatten()
+                graph_sims[person_indices_in_ranking] = \
+                    sim[person_indices_in_imgs]
+
+            # ensure that topk elements are still topk.
+            max_cos_score = y_score[inds][self.topk]
+            min_graph_score = graph_sims.min()
+            graph_sims = graph_sims - min_graph_score + max_cos_score
+            y_score[inds[:self.topk]] = graph_sims
+
+            # 2. Compute AP for this probe (need to scale by recall rate)
+            # y_score = np.asarray(y_score)
+            y_true = np.asarray(y_true)
+            assert count_tp <= count_gt
+            recall_rate = count_tp * 1.0 / count_gt
+            ap = 0 if count_tp == 0 else \
+                average_precision_score(y_true, y_score) * recall_rate
+            aps.append(ap)
+            inds = np.argsort(y_score)[::-1]
+            y_score = y_score[inds]
+            y_true = y_true[inds]
+            accs.append([min(1, sum(y_true[:k])) for k in topk])
+            # 4. Save result for JSON dump
+            new_entry = {'probe_img': str(probe_imname),
+                         'probe_roi': map(float, list(probe_roi.squeeze())),
+                         'probe_gt': probe_gts,
+                         'probe_ap': ap,
+                         'gallery': []}
+            # only save top-10 predictions
+            for k in range(10):
+                new_entry['gallery'].append({
+                    'img': str(imgs[inds[k]]),
+                    'roi': map(float, list(rois[inds[k]])),
+                    'score': float(y_score[k]),
+                    'correct': int(y_true[k]),
+                })
+            ret['results'].append(new_entry)
+
+        print('search ranking:')
+        mAP = np.mean(aps)
+        print('  mAP = {:.2%}'.format(mAP))
+        accs = np.mean(accs, axis=0)
+        for i, k in enumerate(topk):
+            print('  top-{:2d} = {:.2%}'.format(k, accs[i]))
+
+        ret['mAP'] = np.mean(aps)
+        ret['accs'] = accs
+
         top1 = accs[0]
         top5 = accs[1]
         top10 = accs[2]
