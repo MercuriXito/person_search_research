@@ -138,15 +138,18 @@ def build_graph_net(args):
     oim_loss = OIMLoss(num_features, num_pids, num_cq_size, oim_momentum, oim_scalar)
 
     # build reid head
+    reid_head_norm_layer = args.model.reid_head.norm_layer
     if use_multi_scale:
         reid_head = ReIDEmbeddingHead(
             featmap_names=["feat_res4", "feat_res5"],
             in_channels=[1024, 2048],
-            dim=reid_feature_dim, feature_norm=True)
+            dim=reid_feature_dim, feature_norm=True,
+            norm_layer=reid_head_norm_layer)
     else:
         reid_head = ReIDEmbeddingHead(
             featmap_names=['feat_res5'], in_channels=[2048],
-            dim=reid_feature_dim, feature_norm=True)
+            dim=reid_feature_dim, feature_norm=True,
+            norm_layer=reid_head_norm_layer)
 
     roi_head = PSRoIHead(
         box_roi_pool, box_head, box_predictor,
@@ -170,7 +173,9 @@ def build_graph_net(args):
     graph_stack = args.model.graph_head.num_graph_stack
     graph_nheads = args.model.graph_head.nheads
     graph_dropout = args.model.graph_head.dropout
+    graph_module = args.model.graph_head.graph_module
     graph_head = build_graph_head(
+        module=graph_module,
         loss=graph_loss,
         reid_feature_dim=256,
         num_stack=graph_stack,

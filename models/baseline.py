@@ -527,15 +527,18 @@ def build_faster_rcnn_based_models(args):
     oim_loss = OIMLoss(num_features, num_pids, num_cq_size, oim_momentum, oim_scalar)
 
     # build reid head
+    reid_head_norm_layer = args.model.reid_head.norm_layer
     if use_multi_scale:
         reid_head = ReIDEmbeddingHead(
             featmap_names=["feat_res4", "feat_res5"],
             in_channels=[1024, 2048],
-            dim=reid_feature_dim, feature_norm=True)
+            dim=reid_feature_dim, feature_norm=True,
+            norm_layer=reid_head_norm_layer)
     else:
         reid_head = ReIDEmbeddingHead(
             featmap_names=['feat_res5'], in_channels=[2048],
-            dim=reid_feature_dim, feature_norm=True)
+            dim=reid_feature_dim, feature_norm=True,
+            norm_layer=reid_head_norm_layer)
 
     # # build context attention head.
     # use_graph = args.model.roi_head.graph_head.use_graph

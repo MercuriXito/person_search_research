@@ -74,6 +74,7 @@ _C.model.roi_head.k = 16
 
 _C.model.graph_head = CN()
 _C.model.graph_head.use_graph = False
+_C.model.graph_head.graph_module = ""
 _C.model.graph_head.num_graph_stack = 1
 _C.model.graph_head.nheads = 4
 _C.model.graph_head.dropout = 0.0
@@ -87,6 +88,13 @@ _C.model.backbone = CN()
 _C.model.backbone.name = "resnet50"
 _C.model.backbone.norm_layer = "bn"
 _C.model.backbone.pretrained = True
+
+# -------------------------------------------------------- #
+#                reid head for person search               #
+# -------------------------------------------------------- #
+
+_C.model.reid_head = CN()
+_C.model.reid_head.norm_layer = "bn"
 
 # -------------------------------------------------------- #
 #                           Loss                           #

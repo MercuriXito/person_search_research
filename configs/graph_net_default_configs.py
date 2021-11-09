@@ -8,6 +8,7 @@ _C = fconfig.get_default_cfg()
 #             Additional Contex Graph Head                 #
 # -------------------------------------------------------- #
 _C.model.graph_head.use_graph = True
+_C.model.graph_head.graph_module = ""
 _C.model.graph_head.num_graph_stack = 1
 _C.model.graph_head.nheads = 4
 _C.model.graph_head.dropout = 0.0
