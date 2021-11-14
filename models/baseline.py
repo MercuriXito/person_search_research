@@ -116,7 +116,6 @@ class BaseNet(GeneralizedRCNN):
         detections, _ = self.roi_heads(
             features_dict, proposals, images.image_sizes, targets)
 
-
         detections = self.transform.postprocess(
             detections, images.image_sizes, original_image_sizes)
         return detections

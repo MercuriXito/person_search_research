@@ -6,7 +6,7 @@ import torchvision.ops.boxes as box_ops
 import random
 from collections import defaultdict
 
-from models.losses import OIMLoss
+from models.losses import CircleLoss, OIMLoss, ContrastiveLoss, TripletLoss
 
 
 def reshape_back(x):
@@ -26,6 +26,46 @@ def apply_all(func, *args):
 
 def mul(t1, t2):
     return torch.matmul(t1, t2.T)
+
+
+def incremental_take(tensor, indices, dim):
+    """ similar to take_along_dim
+    """
+    assert indices.ndim == 1
+    assert tensor.ndim == 2, "only support 2-d tensor"
+
+    increment_indices = torch.arange(len(indices)).to(indices)
+    if dim == 0:
+        return tensor[indices, increment_indices]
+    else:
+        return tensor[increment_indices, indices]
+
+
+def similarity_to_distance(cos_sim):
+    return (1 - cos_sim) / 2
+
+
+def distance_to_similarity(dist):
+    return 1 - 2 * dist
+
+
+def build_criterion_for_graph_head(args):
+    print(f"{args.name} for Graph Head.")
+    if args.name == "contrastive":
+        criterion = ContrastiveLoss(margin=args.margin)
+    elif args.name == "triplet":
+        criterion = TripletLoss(margin=args.margin)
+    elif args.name == "circle":
+        criterion = CircleLoss(m=args.margin, gamma=args.circle_gamma)
+    else:
+        criterion = OIMLoss(
+            num_features=args.num_features,
+            num_pids=args.num_pids,
+            num_cq_size=args.num_cq_size,
+            oim_momentum=args.oim_momentum,
+            oim_scalar=args.oim_scalar,
+        )
+    return criterion
 
 
 # ------------------------------ Graph Head ---------------------------------
@@ -172,8 +212,8 @@ class ContextGraphHead(nn.Module):
                 outputs.append(scores)
                 losses.append(loss)
             else:
-                outputs.append(scores)
-        loss_graph = torch.stack([l["oim_loss"] for l in losses])
+                outputs.append(output)
+        loss_graph = torch.stack([l["graph_loss"] for l in losses])
         loss_graph = loss_graph.mean()
         losses = dict(loss_graph=loss_graph)
         return outputs, losses
@@ -201,7 +241,7 @@ class ContextGraphHead(nn.Module):
 
 
 class DecoderGraph(nn.Module):
-    def __init__(self, loss,
+    def __init__(self, criterion, num_pids,
                  reid_feature_dim=256, num_stack=1,
                  nheads=4, dropout=0.0, *args, **kwargs):
         super().__init__()
@@ -214,9 +254,9 @@ class DecoderGraph(nn.Module):
             layer(reid_feature_dim, nheads, reid_feature_dim, dropout=dropout)
             for i in range(self.num_stack)
         ])
-        self.loss = loss
-        assert isinstance(self.loss, OIMLoss)  # currently, only support OIMLoss
-        self.num_pids = 5532
+        self.criterion = criterion
+        # assert isinstance(self.criterion, OIMLoss)  # currently, only support OIMLoss
+        self.num_pids = num_pids
 
     def construct_gt_mask(self, qlabels, glabels):
         """ GT matching result for training.
@@ -236,6 +276,80 @@ class DecoderGraph(nn.Module):
         )
         gt_mask[ignored_mask] = -1  # ignored value
         return gt_mask
+
+    def sample_pairs(self, sim_mat, qlabels, glabels):
+        m, n = len(qlabels), len(glabels)
+        match_mask = (qlabels.view(m, 1) == glabels.view(1, n))
+
+        # for match between unlabeled persons, just ignored.
+        q_ignored = (qlabels > self.num_pids)
+        g_ignored = (glabels > self.num_pids)
+        ignored_mask = torch.logical_and(
+            q_ignored.view(m, 1), g_ignored.view(1, n)
+        )
+        pos_pair_mask = torch.logical_and(
+            match_mask, torch.logical_not(ignored_mask)
+        )
+        neg_pair_mask = torch.logical_and(
+            torch.logical_not(match_mask),
+            torch.logical_not(ignored_mask)
+        )
+        pos_pair_mask = pos_pair_mask.type(torch.int)
+        neg_pair_mask = neg_pair_mask.type(torch.int)
+
+        # sample hard positive
+        pos_values = (sim_mat * pos_pair_mask) + (1 - pos_pair_mask) * \
+            (sim_mat.max(dim=1).values.unsqueeze(dim=1) + 1)
+        pos_inds = torch.argmin(pos_values, dim=1)
+        # sample hard negative
+        neg_values = (sim_mat * neg_pair_mask) + (1 - neg_pair_mask) * \
+            (-sim_mat.max(dim=1).values.unsqueeze(dim=1) - 1)
+        neg_inds = torch.argmax(neg_values, dim=1)
+
+        pos_score = incremental_take(sim_mat, pos_inds, 1)
+        neg_score = incremental_take(sim_mat, neg_inds, 1)
+        pos_valid = incremental_take(pos_pair_mask, pos_inds, 1)
+        neg_valid = incremental_take(neg_pair_mask, neg_inds, 1)
+
+        # mask invalid values
+        pos_score = pos_score * pos_valid.to(pos_score)
+        neg_score = neg_score * neg_valid.to(neg_score)
+        return pos_score, neg_score
+
+    def compute_loss(self, sim_mat, qfeats, gfeats, qlabels, glabels):
+        if isinstance(self.criterion, (ContrastiveLoss, TripletLoss)):
+            # pair-wise losses which take pair samples as input.
+            qpos_score, qneg_score = self.sample_pairs(
+                sim_mat, qlabels, glabels)
+            gpos_score, gneg_score = self.sample_pairs(
+                sim_mat.T, glabels, qlabels)
+
+            qloss = self.criterion(
+                similarity_to_distance(qpos_score),
+                similarity_to_distance(qneg_score))
+            gloss = self.criterion(
+                similarity_to_distance(gpos_score),
+                similarity_to_distance(gneg_score))
+            loss = (qloss + gloss) * 0.5
+        elif isinstance(self.criterion, (CircleLoss, )):
+            # pair-wise losses which take pair samples as input.
+            qpos_score, qneg_score = self.sample_pairs(
+                sim_mat, qlabels, glabels)
+            gpos_score, gneg_score = self.sample_pairs(
+                sim_mat.T, glabels, qlabels)
+            qloss = self.criterion(qpos_score / 2, qneg_score / 2)
+            gloss = self.criterion(gpos_score / 2, gneg_score / 2)
+            loss = (qloss + gloss) * 0.5
+        elif isinstance(self.criterion, (OIMLoss, )):
+            # feature-learning losses which take features and
+            # labels as input.
+            graph_feats = torch.cat([qfeats, gfeats])
+            graph_labels = [qlabels, glabels]
+            loss = self.criterion(graph_feats, graph_labels)
+        else:
+            raise Exception(f"Not Implemented Loss: \
+                {str(self.criterion.__class__)}")
+        return dict(graph_loss=loss)
 
     def forward(self, gfeats, qfeats,
                 qlabels=None, glabels=None,
@@ -280,11 +394,9 @@ class DecoderGraph(nn.Module):
             assert qlabels is not None
             assert glabels is not None
 
-            # use oim loss to supervise
-            graph_feats = torch.cat([qfeats, gfeats])
-            graph_labels = [qlabels, glabels]
-            oim_loss = self.loss(graph_feats, graph_labels)
-            return sim_mat, dict(oim_loss=oim_loss)
+            graph_loss = self.compute_loss(
+                sim_mat, qfeats, gfeats, qlabels, glabels)
+            return sim_mat, graph_loss
         return sim_mat
 
     def inference_features(self, gfeats, qfeats):

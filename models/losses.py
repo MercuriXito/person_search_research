@@ -68,3 +68,71 @@ class OIMLoss(nn.Module):
         ) % self.num_unlabeled
         loss_oim = F.cross_entropy(projected, label, ignore_index=5554)
         return loss_oim
+
+
+class ContrastiveLoss(nn.Module):
+    """ Contrastive Loss from "Dimensionality Reduction by Learning an Invariant Mapping".
+    """
+    def __init__(self, margin):
+        super().__init__()
+        self.margin = margin
+
+    def forward(self, sp, sn):
+        similar_loss = torch.pow(sp, 2).mean()
+        dissimilar_loss = torch.pow(torch.relu(self.margin - sn), 2).mean()
+        return (similar_loss + dissimilar_loss) / 2
+
+
+class CircleLoss(nn.Module):
+    """ CircleLoss from "Circle Loss: A Unified Perspective of Pair Similarity Optimization"
+    Implementation from: https://github.com/TinyZeaMays/CircleLoss/blob/master/circle_loss.py
+    """
+    def __init__(self, m: float, gamma: float) -> None:
+        super(CircleLoss, self).__init__()
+        self.m = m
+        self.gamma = gamma
+        self.soft_plus = nn.Softplus()
+
+    def forward(self, sp, sn):
+        ap = torch.clamp_min(- sp.detach() + 1 + self.m, min=0.)
+        an = torch.clamp_min(sn.detach() + self.m, min=0.)
+
+        delta_p = 1 - self.m
+        delta_n = self.m
+
+        logit_p = - ap * (sp - delta_p) * self.gamma
+        logit_n = an * (sn - delta_n) * self.gamma
+
+        loss = self.soft_plus(torch.logsumexp(logit_n, dim=0) + torch.logsumexp(logit_p, dim=0))
+        return loss
+
+
+class TripletLoss(nn.Module):
+    """ Modified triplet loss which takes
+    positive and negative paired similarity as input.
+    """
+    def __init__(self, margin):
+        super(TripletLoss, self).__init__()
+        self.margin = margin
+
+    def forward(self, sp, sn):
+        assert sp.size() == sn.size()
+        return torch.relu(sp - sn + self.margin).mean() + sp.mean()
+
+
+class InfoNCELoss(nn.Module):
+    def __init__(self, T):
+        super(InfoNCELoss, self).__init__()
+        self.T = T
+        self.criterion = nn.CrossEntropyLoss()
+
+    def forward(self, logits):
+        """ Logits in [Bx(1+K)], assuming that the first element of logits
+        is positive.
+        """
+        assert logits.ndim == 2
+        logits /= self.T
+
+        labels = torch.zeros(len(logits), dtype=torch.long).to(logits)
+        loss = self.criterion(logits, labels)
+        return loss

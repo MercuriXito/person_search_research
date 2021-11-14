@@ -78,6 +78,16 @@ _C.model.graph_head.graph_module = ""
 _C.model.graph_head.num_graph_stack = 1
 _C.model.graph_head.nheads = 4
 _C.model.graph_head.dropout = 0.0
+_C.model.graph_head.loss = CN()
+_C.model.graph_head.loss.name = "oim"
+_C.model.graph_head.loss.num_features = 256
+_C.model.graph_head.loss.num_pids = 5532
+_C.model.graph_head.loss.num_cq_size = 5000
+_C.model.graph_head.loss.oim_momentum = 0.5
+_C.model.graph_head.loss.oim_scalar = 30.0
+_C.model.graph_head.loss.margin = 0.25
+_C.model.graph_head.loss.circle_gamma = 64
+
 
 # -------------------------------------------------------- #
 #                         backbone                         #
@@ -165,6 +175,8 @@ _C.eval.eval_context = False
 _C.eval.eval_all_sim = False
 _C.eval.eval_method = "sim"  # proposed for future application.
 _C.eval.checkpoint = "checkpoint.pth"
+_C.eval.use_fast_graph = False
+_C.eval.fast_graph_topk = 50
 
 # -------------------------------------------------------- #
 #                           Miscs                          #

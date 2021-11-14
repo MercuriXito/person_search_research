@@ -119,6 +119,9 @@ def main(args):
             optimizer.load_state_dict(params["optimizer"])
             lr_scheduler.load_state_dict(params["lr_scheduler"])
             trained_epoch = params["epoch"]
+        # load lut
+        if "feats_lut" in params:
+            feats_lut = params["feats_lut"]
     else:
         print(f"checkpoint: {checkpoint_path} does not exists.")
     start_epoch = trained_epoch + 1

@@ -1,0 +1,28 @@
+# freeze training experiments:
+# - CUHK-SYSU; 
+# - w/ ACAE
+# - frozen backbone
+# - OIM Loss
+
+train:
+  output_dir: exps/exps_freeze/exps_cuhk.oim
+  batch_size: 2
+  loss_weights:
+    loss_graph: 1.0
+  resume: exps/baseline/baseline.pth
+  epochs: 10
+  lr_drop_epochs:
+      - 5
+model:
+  backbone:
+    norm_layer: "frozen_bn"
+  reid_head:
+    norm_layer: "frozen_bn"
+  graph_head:
+    loss:
+      name: "oim"
+      num_pids: 5532
+      num_cq_size: 5000
+      oim_momentum: 0.5
+      oim_scalar: 30.0
+

@@ -11,7 +11,7 @@ from models.losses import OIMLoss
 from models.reid_head import ReIDEmbeddingHead
 from models.backbone import build_faster_rcnn_based_backbone
 from models.baseline import BaseNet, PSRoIHead
-from models.ctx_attn_head import ImageFeaturesLut, build_graph_head
+from models.ctx_attn_head import ImageFeaturesLut, build_criterion_for_graph_head, build_graph_head
 
 
 class GraphNet(BaseNet):
@@ -169,14 +169,16 @@ def build_graph_net(args):
     )
 
     # build graph head
-    graph_loss = deepcopy(oim_loss)
+    # graph_loss = deepcopy(oim_loss)
+    graph_loss = build_criterion_for_graph_head(args.model.graph_head.loss)
     graph_stack = args.model.graph_head.num_graph_stack
     graph_nheads = args.model.graph_head.nheads
     graph_dropout = args.model.graph_head.dropout
     graph_module = args.model.graph_head.graph_module
     graph_head = build_graph_head(
         module=graph_module,
-        loss=graph_loss,
+        criterion=graph_loss,
+        num_pids=num_pids,
         reid_feature_dim=256,
         num_stack=graph_stack,
         nheads=graph_nheads,
