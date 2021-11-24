@@ -1,0 +1,36 @@
+# freeze training experiments:
+# - PRW; 
+# - w/ ACAE
+# - frozen backbone
+# - contrastive loss(0.35)
+
+train:
+  output_dir: exps/exps_freeze/exps_prw.closs_35
+  batch_size: 2
+  dataset: prw
+  data_root: "data/prw"
+  loss_weights:
+    loss_graph: 10.0
+  resume: exps/baseline/baseline.prw.pth
+  epochs: 10
+  lr_drop_epochs:
+      - 5
+model:
+  backbone:
+    norm_layer: "frozen_bn"
+  reid_head:
+    norm_layer: "frozen_bn"
+  graph_head:
+    loss:
+      name: "contrastive"
+      margin: 0.35
+eval:
+  dataset_file: prw
+  dataset_path: data/prw
+  use_fast_graph: True
+  fast_graph_topk: 50
+loss:
+  oim:
+    num_pids: 482
+    num_cq_size: 500
+

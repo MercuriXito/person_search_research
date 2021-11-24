@@ -28,7 +28,6 @@ echo `date`, "start task"
 # python -m models.graph_trainer --cfg configs/exps_configs/exps_prw.graph.lossw_101.yml
 # python -m evaluation.eval_graph exps/exps_prw.oim.graph.lossw_101
 
-
 ## ========================== ACAE experiments ==============================
 
 # experiment: detach(in Hack settings)
@@ -38,5 +37,18 @@ echo `date`, "start task"
 # python -m models.graph_trainer --cfg configs/exps_acae/exps_cuhk.detach.yml
 # python -m evaluation.eval_graph exps/exps_acae/exps_cuhk.detach
 
+# experiment: acae with different losses
+# python -m models.graph_trainer --cfg configs/exps_acae/exps_cuhk.closs_35.yml
+# python -m evaluation.eval_graph exps/exps_acae/exps_cuhk.closs_35
+
+# python -m models.graph_trainer --cfg configs/exps_acae/exps_cuhk.closs_45.yml
+# python -m evaluation.eval_graph exps/exps_acae/exps_cuhk.closs_45
+
+## ----------------- PRW ------------------------
+# python -m models.graph_trainer --cfg configs/exps_acae/exps_prw.closs_35.yml
+# python -m evaluation.eval_graph exps/exps_acae/exps_prw.closs_35
+
+python -m models.graph_trainer --cfg configs/exps_acae/exps_prw.closs_50.yml
+python -m evaluation.eval_graph exps/exps_acae/exps_prw.closs_50
 
 echo `date`, "task finised"

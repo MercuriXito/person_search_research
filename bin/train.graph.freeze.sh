@@ -16,7 +16,7 @@ echo `date`, "start task"
 # python -m evaluation.eval_graph exps/exps_freeze/exps_cuhk \
 #     --eval-config exps/exps_freeze/exps_cuhk/eval.validate.yml
 
-## ----------------- CUHK ------------------------
+## ----------------- CUHK experiments of losses ------------------------
 # # train
 # python -m models.freeze_trainer --cfg configs/exps_freeze/exps_cuhk.closs.test.yml
 # python -m evaluation.eval_graph exps/exps_freeze/exps_cuhk.closs
@@ -45,8 +45,12 @@ echo `date`, "start task"
 # python -m models.freeze_trainer --cfg configs/exps_freeze/exps_cuhk.closs_40.yml
 # python -m evaluation.eval_graph exps/exps_freeze/exps_cuhk.closs_40
 
-# python -m models.graph_trainer --cfg configs/exps_acae/exps_cuhk.closs_35.yml
-# python -m evaluation.eval_graph exps/exps_acae/exps_cuhk.closs_35
+## ----------------- PRW experiments of losses ------------------------
 
+python -m models.freeze_trainer --cfg configs/exps_freeze/exps_prw.closs_35.yml
+python -m evaluation.eval_graph exps/exps_freeze/exps_prw.closs_35
+
+python -m models.freeze_trainer --cfg configs/exps_freeze/exps_prw.closs_50.yml
+python -m evaluation.eval_graph exps/exps_freeze/exps_prw.closs_50
 
 echo `date`, "task finised"

@@ -215,19 +215,22 @@ def evaluate(extractor, args, imdb=None, ps_evaluator=None, res_pkl=None):
         iou_thresh=args.nms_thresh,
         labeled_only=True)
 
-    mAP, top1, top5, top10, _ = ps_evaluator.eval_search(
+    mAP, top1, top5, top10, ret = ps_evaluator.eval_search(
         imdb, probes, gallery_boxes, gallery_features, query_features,
         det_thresh=args.det_thresh, gallery_size=args.gallery_size,
         use_context=args.eval_context, graph_thred=args.graph_thred)
 
-    table = PrettyTable(field_names=[
+    file_names = [
         "item", "det_ap", "det_recall", "labeled_ap", "labeled_recall",
-        "mAP", "top1", "top5", "top10"])
+        "mAP", "top1", "top5", "top10"]
+    table = PrettyTable(field_names=file_names)
     eval_res = [
-        det_ap, det_recall, label_det_ap, label_det_recall,
+        "item", det_ap, det_recall, label_det_ap, label_det_recall,
         mAP, top1, top5, top10]
-    format_eval_res = ["{:.8f}".format(res_item) for res_item in eval_res]
-    format_eval_res = ["item"] + format_eval_res
+    formats = ["{}"] + ["{:8f}"] * 8
+    format_eval_res = [
+        formats[i].format(res_item)
+        for i, res_item in enumerate(eval_res)]
     table.add_row(format_eval_res)
     print(table)
 
@@ -237,8 +240,9 @@ def evaluate(extractor, args, imdb=None, ps_evaluator=None, res_pkl=None):
         "gallery_features": gallery_features,
         "query_boxes": query_boxes,
         "query_features": query_features,
-        "eval_res": eval_res,
+        "eval_res": dict([(k, v) for k, v in zip(file_names, eval_res)]),
         "eval_args": args,
+        "eval_rank": ret,
     }
 
     return res_pkl, table.get_string()
