@@ -101,7 +101,7 @@ def draw_boxes_text(
             cimage, (x1, y1), (x2, y2),
             get_random_colors(i), 2
         )
-        cv2.putText(cimage, text, (x1, y1), 0, 1, get_random_colors(i), 2)
+        cv2.putText(cimage, text, (x1, y1), 0, 0.5, get_random_colors(i), 2)
 
     if write_output:
         if len(name) == 0:

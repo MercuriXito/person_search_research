@@ -245,7 +245,7 @@ class PersonSearchEvaluator:
                     w, h = gt[2], gt[3]
                     gt[2:] += gt[:2]
                     probe_gt.append({'img': str(gallery_imname),
-                                        'roi': map(float, list(gt))})
+                                        'roi': list(map(float, list(gt)))})
                     iou_thresh = min(0.5, (w * h * 1.0) /
                                         ((w + 10) * (h + 10)))
                     inds = np.argsort(sim)[::-1]
@@ -303,7 +303,7 @@ class PersonSearchEvaluator:
             accs.append([min(1, sum(y_true[:k])) for k in topk])
             # 4. Save result for JSON dump
             new_entry = {'probe_img': str(probe_imname),
-                         'probe_roi': map(float, list(probe_roi)),
+                         'probe_roi': list(map(float, list(probe_roi))),
                          'probe_gt': probe_gt,
                          'probe_ap': ap,
                          'gallery': []}
@@ -311,7 +311,7 @@ class PersonSearchEvaluator:
             for k in range(10):
                 new_entry['gallery'].append({
                     'img': str(imgs[inds[k]]),
-                    'roi': map(float, list(rois[inds[k]])),
+                    'roi': list(map(float, list(rois[inds[k]]))),
                     'score': float(y_score[k]),
                     'correct': int(y_true[k]),
                     'det_correct': int(y_true_box[k]),
@@ -455,7 +455,7 @@ class PersonSearchEvaluator:
             accs.append([min(1, sum(y_true[:k])) for k in topk])
             # 4. Save result for JSON dump
             new_entry = {'probe_img': str(probe_imname),
-                         'probe_roi': map(float, list(probe_roi.squeeze())),
+                         'probe_roi': list(map(float, list(probe_roi.squeeze()))),
                          'probe_gt': probe_gts,
                          'probe_ap': ap,
                          'gallery': []}
@@ -463,7 +463,7 @@ class PersonSearchEvaluator:
             for k in range(10):
                 new_entry['gallery'].append({
                     'img': str(imgs[inds[k]]),
-                    'roi': map(float, list(rois[inds[k]])),
+                    'roi': list(map(float, list(rois[inds[k]]))),
                     'score': float(y_score[k]),
                     'correct': int(y_true[k]),
                 })
@@ -719,9 +719,8 @@ class FastGraphPSEvaluator(GraphPSEvaluator):
                     w, h = gt[2], gt[3]
                     gt[2:] += gt[:2]
                     probe_gt.append({'img': str(gallery_imname),
-                                        'roi': map(float, list(gt))})
-                    iou_thresh = min(0.5, (w * h * 1.0) /
-                                        ((w + 10) * (h + 10)))
+                                     'roi': list(map(float, list(gt)))})
+                    iou_thresh = min(0.5, (w * h * 1.0)/((w + 10) * (h + 10)))
                     inds = np.argsort(sim)[::-1]
                     sim = sim[inds]
                     det = det[inds]
@@ -821,7 +820,7 @@ class FastGraphPSEvaluator(GraphPSEvaluator):
             accs.append([min(1, sum(y_true[:k])) for k in topk])
             # 4. Save result for JSON dump
             new_entry = {'probe_img': str(probe_imname),
-                         'probe_roi': map(float, list(probe_roi)),
+                         'probe_roi': list(map(float, list(probe_roi))),
                          'probe_gt': probe_gt,
                          'probe_ap': ap,
                          'gallery': []}
@@ -829,7 +828,7 @@ class FastGraphPSEvaluator(GraphPSEvaluator):
             for k in range(10):
                 new_entry['gallery'].append({
                     'img': str(imgs[inds[k]]),
-                    'roi': map(float, list(rois[inds[k]])),
+                    'roi': list(map(float, list(rois[inds[k]]))),
                     'score': float(y_score[k]),
                     'correct': int(y_true[k]),
                     'det_correct': int(y_true_box[k]),
@@ -1013,7 +1012,7 @@ class FastGraphPSEvaluator(GraphPSEvaluator):
             accs.append([min(1, sum(y_true[:k])) for k in topk])
             # 4. Save result for JSON dump
             new_entry = {'probe_img': str(probe_imname),
-                         'probe_roi': map(float, list(probe_roi.squeeze())),
+                         'probe_roi': list(map(float, list(probe_roi.squeeze()))),
                          'probe_gt': probe_gts,
                          'probe_ap': ap,
                          'gallery': []}
@@ -1021,7 +1020,7 @@ class FastGraphPSEvaluator(GraphPSEvaluator):
             for k in range(10):
                 new_entry['gallery'].append({
                     'img': str(imgs[inds[k]]),
-                    'roi': map(float, list(rois[inds[k]])),
+                    'roi': list(map(float, list(rois[inds[k]]))),
                     'score': float(y_score[k]),
                     'correct': int(y_true[k]),
                 })

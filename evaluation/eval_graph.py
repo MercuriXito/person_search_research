@@ -27,7 +27,7 @@ def main():
     if eval_args.use_fast_graph:
         ps_evaluator = FastGraphPSEvaluator(
             model.graph_head, device, eval_args.dataset_file,
-            topk=args.fast_graph_topk,
+            topk=eval_args.fast_graph_topk,
             eval_all_sim=eval_args.eval_all_sim)
     else:
         ps_evaluator = GraphPSEvaluator(
