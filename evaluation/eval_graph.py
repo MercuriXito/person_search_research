@@ -3,7 +3,8 @@ import os
 
 from utils.misc import pickle
 from evaluation.evaluator import FastGraphPSEvaluator, GraphPSEvaluator
-from evaluation.eval import FasterRCNNExtractor, evaluate
+from evaluation.eval import FasterRCNNExtractor, evaluate, \
+    GTFeatureExtractor
 from evaluation.eval_defaults import build_and_load_from_dir \
     as build_and_load_from_dir
 
@@ -23,7 +24,11 @@ def main():
     checkpoint_path = os.path.join(args.exp_dir, eval_args.checkpoint)
 
     device = torch.device(eval_args.device)
-    extractor = FasterRCNNExtractor(model, device)
+    if eval_args.use_gt:
+        extractor = GTFeatureExtractor(model, device)
+    else:
+        extractor = FasterRCNNExtractor(model, device)
+
     if eval_args.use_fast_graph:
         ps_evaluator = FastGraphPSEvaluator(
             model.graph_head, device, eval_args.dataset_file,
@@ -41,6 +46,8 @@ def main():
     prefix = "eval"
     if eval_args.eval_context:
         prefix = f"acae.G{eval_args.graph_thred}.{prefix}"
+    if eval_args.use_gt:
+        prefix = f"{prefix}.gt."
     save_path = f"{checkpoint_path}.{prefix}.pkl"
     table_string_path = f"{checkpoint_path}.{prefix}.txt"
     pickle(res_pkl, save_path)

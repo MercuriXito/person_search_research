@@ -5,7 +5,8 @@ from models.graph_net import build_graph_net
 from utils.misc import pickle
 from models.baseline import build_faster_rcnn_based_models
 from configs.faster_rcnn_default_configs import get_default_cfg
-from evaluation.eval import FasterRCNNExtractor, evaluate
+from evaluation.eval import FasterRCNNExtractor, evaluate, \
+    GTFeatureExtractor
 from evaluation.evaluator import PersonSearchEvaluator
 
 
@@ -32,6 +33,7 @@ def build_and_load_from_dir(exp_dir, dst_eval_file=""):
     t_args.merge_from_file(config_file)
     t_args.freeze()
     eval_args = t_args.eval
+    print(eval_args)
 
     # load model
     if t_args.model.graph_head.use_graph:
@@ -65,7 +67,10 @@ def main():
     model, t_args = build_and_load_from_dir(args.exp_dir, args.eval_config)
     eval_args = t_args.eval
     device = torch.device(eval_args.device)
-    extractor = FasterRCNNExtractor(model, device)
+    if eval_args.use_gt:
+        extractor = GTFeatureExtractor(model, device)
+    else:
+        extractor = FasterRCNNExtractor(model, device)
     ps_evaluator = PersonSearchEvaluator(eval_args.dataset_file)
     res_pkl, table_string = evaluate(extractor, eval_args, ps_evaluator=ps_evaluator)
 
@@ -74,6 +79,8 @@ def main():
     prefix = "eval"
     if eval_args.eval_context:
         prefix = f"cmm.G{eval_args.graph_thred}.{prefix}"
+    if eval_args.use_gt:
+        prefix = f"{prefix}.gt."
     save_path = f"{checkpoint_path}.{prefix}.pkl"
     table_string_path = f"{checkpoint_path}.{prefix}.txt"
     pickle(res_pkl, save_path)

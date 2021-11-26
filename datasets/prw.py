@@ -130,6 +130,52 @@ class PRW(PersonSearchDataset):
 
         return probes
 
+    def load_probes_with_ctx(self):
+        query_info = osp.join(self.root, 'query_info.txt')
+        with open(query_info, 'r') as f:
+            raw = f.readlines()
+
+        probes = []
+        for line in raw:
+            linelist = line.split()
+            pid = int(linelist[0])
+            # x, y, w, h = [float(x) for x in linelist[1:-1]]
+            im_name = linelist[-1] + ".jpg"
+
+            # annotation files including surrounding persons
+            anno_path = osp.join(self.root, 'annotations', im_name)
+            anno = loadmat(anno_path)
+            box_key = 'box_new'
+            if box_key not in anno.keys():
+                box_key = 'anno_file'
+            if box_key not in anno.keys():
+                box_key = 'anno_previous'
+
+            all_rois = anno[box_key][:, 1:]
+            all_pids = anno[box_key][:, 0]
+            all_rois = np.clip(all_rois, 0, None)  # several coordinates are negative
+            all_rois[:, 2:] += all_rois[:, :2]
+
+            # move the query target to the last one
+            idx = np.where(all_pids == pid)[0][0]
+            indices = np.arange(0, len(all_rois)).astype(np.int)
+            indices[-1], indices[idx] = indices[idx], indices[-1]
+            all_rois = all_rois[indices]
+            all_pids = all_pids[indices]
+
+            probes.append({
+                'im_name': im_name,
+                'path': osp.join(self.get_data_path(), im_name),
+                'boxes': all_rois.astype(np.int),
+                # Useless. Can be set to any value.
+                'gt_pids': all_pids.astype(np.int),
+                'flipped': False,
+                'cam_id': self._get_cam_id(im_name)
+            })
+
+        return probes
+
+
     def _get_cam_id(self, im_name):
         match = re.search('c\d', im_name).group().replace('c', '')
         return int(match)

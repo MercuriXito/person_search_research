@@ -17,6 +17,12 @@ def sigmoid(arr):
     return 1 / (np.exp(-arr) + 1)
 
 
+def softmax(arr):
+    carr = arr - arr.max()
+    exp_arr = np.exp(carr)
+    return exp_arr / exp_arr.sum()
+
+
 def graph_dist(image_match_scores, reid_scores):
     """ adaptive graph distance, excluding the context from gallery target.
     """

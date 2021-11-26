@@ -3,6 +3,7 @@ from typing import Dict, List
 import os
 import PIL.Image as Image
 from prettytable import PrettyTable
+from tqdm import tqdm
 
 import torch
 import torch.nn as nn
@@ -11,7 +12,6 @@ import torchvision.ops as box_ops
 from torchvision.models.detection.transform import GeneralizedRCNNTransform
 
 from utils.misc import ship_to_cuda, unpickle
-from tqdm import tqdm
 from datasets import load_eval_datasets
 from evaluation.evaluator import PersonSearchEvaluator
 
@@ -168,7 +168,52 @@ class FasterRCNNExtractor(Person_Search_Features_Extractor):
         return query_features, query_rois
 
 
-def evaluate(extractor, args, imdb=None, ps_evaluator=None, res_pkl=None):
+class GTFeatureExtractor(FasterRCNNExtractor):
+    """ Use ground truth gallery boxes to extract features, while keeping
+    query as the same. This avoids effect from detection to searching.
+    """
+    def __init__(self, model, device=None) -> None:
+        super().__init__(model, device=device)
+
+    @torch.no_grad()
+    def get_gallery_features(self, galleries, *args, **kwargs):
+        gallery_features = []
+        gallery_rois = []
+
+        for item in tqdm(galleries):
+            img_path = item["path"]
+            image = Image.open(img_path)
+
+            scores = torch.tensor([1] * len(item["boxes"])).reshape(-1, 1)
+            boxes = torch.tensor(item["boxes"])
+            targets = [dict(boxes=item["boxes"], scores=scores)]
+            image = [self.transform(image)]
+            image, targets = ship_to_cuda(image, targets, device=self.device)
+            features = self.model.extract_features_with_boxes(image, targets)
+
+            scores = scores.view(-1, 1)
+            rois = torch.cat([boxes, scores], dim=1)
+            rois = rois.detach().cpu().numpy()
+            features = features.detach().cpu().numpy()
+
+            gallery_features.append(features)
+            gallery_rois.append(rois)
+
+        return gallery_features, gallery_rois
+
+
+class GTQueryFeatureExtractor(GTFeatureExtractor):
+    """ Extractor features for ground truth query target and its surrouding
+    persons. This annotation is only availiable in PRW in
+    `prw.load_probes_with_ctx`.
+    """
+    @torch.no_grad()
+    def get_query_features(
+            self, probes, use_query_ctx_boxes=False, *args, **kwargs):
+        return self.get_gallery_features(probes)
+
+
+def evaluate(extractor, args, /, imdb=None, ps_evaluator=None, res_pkl=None):
     if imdb is None:
         imdb = load_eval_datasets(args)
     probes = imdb.probes

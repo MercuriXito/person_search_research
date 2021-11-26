@@ -35,6 +35,28 @@ def unpickle(file_path):
     return data
 
 
+def compute_iou_mat(a: np.ndarray, b: np.ndarray):
+    m, n = len(a), len(b)
+
+    a = np.expand_dims(a, 1)
+    b = np.expand_dims(b, 0)
+    a = a.repeat(n, 1).reshape(-1, a.shape[-1])
+    b = b.repeat(m, 0).reshape(-1, a.shape[-1])
+
+    x1 = np.maximum(a[:, 0], b[:, 0])
+    y1 = np.maximum(a[:, 1], b[:, 1])
+    x2 = np.minimum(a[:, 2], b[:, 2])
+    y2 = np.minimum(a[:, 3], b[:, 3])
+
+    inter = np.maximum(x2 - x1, 0) * np.maximum(y2 - y1, 0)
+    union = (a[:, 2] - a[:, 0]) * (a[:, 3] - a[:, 1]) + \
+        (b[:, 2] - b[:, 0]) * (b[:, 3] - b[:, 1]) - inter
+
+    mat = inter * 1.0 / union
+    mat = mat.reshape(m, n)
+    return mat
+
+
 def _compute_iou(a, b):
     x1 = max(a[0], b[0])
     y1 = max(a[1], b[1])

@@ -119,11 +119,6 @@ _C.loss.oim.oim_momentum = 0.5
 _C.loss.oim.oim_scalar = 30.0
 
 # -------------------------------------------------------- #
-#                        Evaluation                        #
-# -------------------------------------------------------- #
-_C.eval = CN()
-
-# -------------------------------------------------------- #
 #                        Train                             #
 # -------------------------------------------------------- #
 _C.train = CN()
@@ -168,6 +163,7 @@ _C.eval.gallery_size = 100
 _C.eval.graph_thred = 0.0
 _C.eval.nms_thresh = 0.5
 _C.eval.use_data = ""
+_C.eval.use_gt = False
 _C.eval.device = "cuda"
 _C.eval.dataset_file = "cuhk-sysu"
 _C.eval.dataset_path = "data/cuhk-sysu"
