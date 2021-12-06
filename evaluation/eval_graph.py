@@ -47,7 +47,7 @@ def main():
     if eval_args.eval_context:
         prefix = f"acae.G{eval_args.graph_thred}.{prefix}"
     if eval_args.use_gt:
-        prefix = f"{prefix}.gt."
+        prefix = f"{prefix}.gt"
     save_path = f"{checkpoint_path}.{prefix}.pkl"
     table_string_path = f"{checkpoint_path}.{prefix}.txt"
     pickle(res_pkl, save_path)

@@ -154,3 +154,24 @@ def ship_to_cuda(images, targets=None, device=None):
         return images, new_targets
     else:
         return images
+
+
+def compare(outs_a, outs_b):
+    assert type(outs_a) == type(outs_b)
+    res = True
+    if isinstance(outs_a, dict):
+        assert set(outs_a.keys()) == set(outs_b.keys())
+        for k in outs_a.keys():
+            va, vb = outs_a[k], outs_b[k]
+            res = res and compare(va, vb)
+    elif isinstance(outs_a, (list, tuple)):
+        assert len(outs_a) == len(outs_b)
+        for i in range(len(outs_a)):
+            res = res and compare(outs_a[i], outs_b[i])
+    elif isinstance(outs_a, torch.Tensor):
+        res = res and (torch.sum(outs_a - outs_b != 0) == 0).item()
+    elif isinstance(outs_a, np.ndarray):
+        res = res and (np.sum(outs_a - outs_b != 0) == 0).item()
+    else:
+        raise NotImplementedError(f"{type(outs_a)}")
+    return res
