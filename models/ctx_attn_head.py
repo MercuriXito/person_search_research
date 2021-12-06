@@ -206,7 +206,8 @@ class ContextGraphHead(nn.Module):
         outputs, losses = [], []
         for bidx in range(bs):
             output = self.graph_head(
-                embeddings[bidx], pair_embeddings[bidx], labels[bidx], pair_labels[bidx])
+                embeddings[bidx], pair_embeddings[bidx],
+                labels[bidx], pair_labels[bidx])
             if self.training:
                 scores, loss = output
                 outputs.append(scores)
@@ -277,15 +278,77 @@ class DecoderGraph(nn.Module):
         gt_mask[ignored_mask] = -1  # ignored value
         return gt_mask
 
-    def sample_pairs(self, sim_mat, qlabels, glabels):
-        m, n = len(qlabels), len(glabels)
-        match_mask = (qlabels.view(m, 1) == glabels.view(1, n))
+    def sample_pairs_gt(self, sim_mat, glabels, qlabels):
+        # sim_mat in [glen x qlen] shape
+        m, n = len(glabels), len(qlabels)
+        match_mask = (glabels.view(m, 1) == qlabels.view(1, n))
 
-        # for match between unlabeled persons, just ignored.
+        # for match between unlabeled persons, just ignored
         q_ignored = (qlabels > self.num_pids)
         g_ignored = (glabels > self.num_pids)
         ignored_mask = torch.logical_and(
-            q_ignored.view(m, 1), g_ignored.view(1, n)
+            g_ignored.view(m, 1), q_ignored.view(1, n)
+        )
+        pos_pair_mask = torch.logical_and(
+            match_mask, torch.logical_not(ignored_mask)
+        )
+        neg_pair_mask = torch.logical_and(
+            torch.logical_not(match_mask),
+            torch.logical_not(ignored_mask)
+        )
+        pos_pair_mask = pos_pair_mask.type(torch.int)
+        neg_pair_mask = neg_pair_mask.type(torch.int)
+
+        # sample hard positive
+        pos_values = (sim_mat * pos_pair_mask) + (1 - pos_pair_mask) * \
+            (sim_mat.max(dim=1).values.unsqueeze(dim=1) + 1)
+        pos_inds = torch.argmin(pos_values, dim=1)
+
+        # sample hard negative
+        neg_values = (sim_mat * neg_pair_mask) + (1 - neg_pair_mask) * \
+            (-sim_mat.max(dim=1).values.unsqueeze(dim=1) - 1)
+        neg_inds = torch.argmax(neg_values, dim=1)
+
+        pos_score = incremental_take(sim_mat, pos_inds, 1)
+        neg_score = incremental_take(sim_mat, neg_inds, 1)
+        pos_valid = incremental_take(pos_pair_mask, pos_inds, 1)
+        neg_valid = incremental_take(neg_pair_mask, neg_inds, 1)
+
+        # mask invalid values
+        pos_score = pos_score * pos_valid.to(pos_score)
+        neg_score = neg_score * neg_valid.to(neg_score)
+        return pos_score, neg_score
+
+    def compute_loss_gt(self, sim_mat, qfeats, gfeats, qlabels, glabels):
+
+        assert len(qfeats) == len(qlabels)
+        assert len(gfeats) == len(glabels)
+
+        qpos_score, qneg_score = self.sample_pairs_gt(
+            sim_mat, glabels, qlabels)
+        gpos_score, gneg_score = self.sample_pairs_gt(
+            sim_mat.T, qlabels, glabels)
+
+        qloss = self.criterion(
+            similarity_to_distance(qpos_score),
+            similarity_to_distance(qneg_score))
+        gloss = self.criterion(
+            similarity_to_distance(gpos_score),
+            similarity_to_distance(gneg_score))
+        loss = (qloss + gloss) * 0.5
+        return dict(graph_loss=loss)
+
+    def sample_pairs(self, sim_mat, glabels, qlabels):
+        m, n = len(glabels), len(qlabels)
+        assert sim_mat.ndim == 2
+        assert len(sim_mat) == m and len(sim_mat[0]) == n
+        match_mask = (glabels.view(m, 1) == qlabels.view(1, n))
+
+        # for match between unlabeled persons, just ignored.
+        g_ignored = (glabels > self.num_pids)
+        q_ignored = (qlabels > self.num_pids)
+        ignored_mask = torch.logical_and(
+            g_ignored.view(m, 1), q_ignored.view(1, n)
         )
         pos_pair_mask = torch.logical_and(
             match_mask, torch.logical_not(ignored_mask)
@@ -318,11 +381,14 @@ class DecoderGraph(nn.Module):
 
     def compute_loss(self, sim_mat, qfeats, gfeats, qlabels, glabels):
         if isinstance(self.criterion, (ContrastiveLoss, TripletLoss)):
+
+            assert len(qfeats) == len(qlabels)
+            assert len(gfeats) == len(glabels)
             # pair-wise losses which take pair samples as input.
             qpos_score, qneg_score = self.sample_pairs(
-                sim_mat, qlabels, glabels)
+                sim_mat, glabels, qlabels)
             gpos_score, gneg_score = self.sample_pairs(
-                sim_mat.T, glabels, qlabels)
+                sim_mat.T, qlabels, glabels)
 
             qloss = self.criterion(
                 similarity_to_distance(qpos_score),
@@ -352,7 +418,7 @@ class DecoderGraph(nn.Module):
         return dict(graph_loss=loss)
 
     def forward(self, gfeats, qfeats,
-                qlabels=None, glabels=None,
+                glabels=None, qlabels=None,
                 eval_avg_sim=False, *args, **kwargs):
         """ [NxC] input for both features, return similarity matrix.
         """
