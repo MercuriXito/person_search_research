@@ -9,14 +9,30 @@ import matplotlib.pyplot as plt
 
 
 from datasets import load_eval_datasets
+from datasets.cuhk_sysu import CUHK_SYSU
+from datasets.prw import PRW
 from evaluation.eval import evaluate
 from evaluation.eval_defaults import build_and_load_from_dir
 from evaluation.evaluator import GraphPSEvaluator, PersonSearchEvaluator
-from evaluation.exps_eval_dense import get_all_query_persons
 from configs.faster_rcnn_default_configs import get_default_cfg
 from utils.misc import pickle, unpickle
 from utils.vis import compute_ap
 from utils.vis import draw_boxes_text
+
+
+def get_all_query_persons(imdb):
+    # HACK: since there is only one gt query box annotation
+    # in query images, using the pickle result.
+    if isinstance(imdb, CUHK_SYSU):
+        data = unpickle(
+            "exps/exps_cuhk.graph/checkpoint.pth.ctx.G0.4.eval.pkl")
+        query_boxes = data["query_boxes"]
+    elif isinstance(imdb, PRW):
+        query_items = imdb.load_probes_with_ctx()
+        query_boxes = [item["boxes"] for item in query_items]
+    else:
+        raise NotImplementedError(f"{imdb.__class__}")
+    return query_boxes
 
 
 def get_args():
@@ -133,7 +149,9 @@ def main():
     os.makedirs(save_root, exist_ok=True)
 
     eval_data, pkl_data = load_pickle_and_eval(pkl_path)
-    query_persons = get_all_query_persons()
+    query_persons = get_all_query_persons(
+        load_eval_datasets(pkl_data["eval_args"])
+    )
 
     missed_dets = []
     for idx, item in enumerate(tqdm((eval_data["results"]))):
@@ -166,7 +184,9 @@ def main_aps():
     pkl_path = args.pkl
 
     eval_data, pkl_data = load_pickle_and_eval(pkl_path)
-    query_persons = get_all_query_persons()
+    query_persons = get_all_query_persons(
+        load_eval_datasets(pkl_data["eval_args"])
+    )
 
     data = defaultdict(lambda: [])
     for idx, item in enumerate(tqdm((eval_data["results"]))):
@@ -181,6 +201,7 @@ def main_aps():
     plt.title("Averaged ap under scene with different number of persons.")
     plt.xlabel("average ap")
     plt.ylabel("number of persons in query image")
+    plt.ylim([0, 1])
     plt.savefig(pkl_path + ".avg_ap.png")
 
 
@@ -236,10 +257,12 @@ def main_diff_map():
     to find under which circumstance model A is inferior than model B.
     """
     args = get_double_args()
-    eval_a, _ = load_pickle_and_eval(args.pkl1)
+    eval_a, pkl_a = load_pickle_and_eval(args.pkl1)
     eval_b, _ = load_pickle_and_eval(args.pkl2)
 
-    query_persons = get_all_query_persons()
+    query_persons = get_all_query_persons(
+        load_eval_datasets(pkl_a["eval_args"])
+    )
     ans = defaultdict(lambda: [0, 0])
 
     for idx in tqdm(range(len(eval_a["results"]))):
@@ -344,5 +367,5 @@ def visualize_ap_worse_samples():
 if __name__ == '__main__':
     # main()
     # main_diff_map()
-    # main_aps()
-    visualize_ap_worse_samples()
+    main_aps()
+    # visualize_ap_worse_samples()

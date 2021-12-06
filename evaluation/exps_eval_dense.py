@@ -8,14 +8,7 @@ from datasets import load_eval_datasets
 from evaluation.eval import FasterRCNNExtractor, evaluate
 from evaluation.evaluator import GraphPSEvaluator, PersonSearchEvaluator
 from evaluation.eval_defaults import build_and_load_from_dir
-from utils.misc import unpickle
-
-
-def get_all_query_persons():
-    # HACK: since there is only one gt query box annotation
-    # in query images, using the pickle result.
-    query_boxes = unpickle("exps/exps_cuhk.graph/checkpoint.pth.ctx.G0.4.eval.pkl")["query_boxes"]
-    return query_boxes
+from evaluation.badcase import get_all_query_persons
 
 
 def get_dense_dataset(select_thresh=10):
@@ -23,10 +16,10 @@ def get_dense_dataset(select_thresh=10):
     """
     dataset = load_eval_datasets(EasyDict(
         dataset_file="cuhk-sysu",
-        root="dadta/cuhk-sysu/"
+        root="data/cuhk-sysu/"
     ))
     probes = dataset.probes
-    query_boxes = get_all_query_persons()
+    query_boxes = get_all_query_persons(dataset)
 
     # select probes under dense situation.
     dense_probes = []
