@@ -1,0 +1,29 @@
+# freeze training experiments:
+# - CUHK-SYSU; 
+# - w/ ACAE
+# - frozen backbone
+# - contrastive loss
+
+train:
+  output_dir: exps/exps_freeze/exps_cuhk.closs_45.validate
+  batch_size: 2
+  loss_weights:
+    loss_graph: 10.0
+  resume: exps/baseline/baseline.pth
+  epochs: 10
+  lr_drop_epochs:
+      - 5
+model:
+  backbone:
+    norm_layer: "frozen_bn"
+  reid_head:
+    norm_layer: "frozen_bn"
+  graph_head:
+    loss:
+      name: "contrastive"
+      margin: 0.45
+eval:
+  eval_context: true
+  eval_all_sim: true
+  graph_thred: 0.4
+
