@@ -78,6 +78,7 @@ def train_one_epoch(
 def main(args):
     device = torch.device(args.device)
     torch.random.manual_seed(args.seed)
+    torch.cuda.manual_seed(args.seed)
     np.random.seed(args.seed)
     random.seed(args.seed)
 

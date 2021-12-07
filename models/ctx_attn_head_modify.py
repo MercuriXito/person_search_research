@@ -277,15 +277,15 @@ class DecoderGraph(nn.Module):
         gt_mask[ignored_mask] = -1  # ignored value
         return gt_mask
 
-    def sample_pairs(self, sim_mat, qlabels, glabels):
-        m, n = len(qlabels), len(glabels)
-        match_mask = (qlabels.view(m, 1) == glabels.view(1, n))
+    def sample_pairs(self, sim_mat, glabels, qlabels):
+        m, n = len(glabels), len(qlabels)
+        match_mask = (glabels.view(m, 1) == qlabels.view(1, n))
 
         # for match between unlabeled persons, just ignored.
-        q_ignored = (qlabels > self.num_pids)
         g_ignored = (glabels > self.num_pids)
+        q_ignored = (qlabels > self.num_pids)
         ignored_mask = torch.logical_and(
-            q_ignored.view(m, 1), g_ignored.view(1, n)
+            g_ignored.view(m, 1), q_ignored.view(1, n)
         )
         pos_pair_mask = torch.logical_and(
             match_mask, torch.logical_not(ignored_mask)
@@ -321,11 +321,13 @@ class DecoderGraph(nn.Module):
         """ Only used for debug contrastive loss.
         """
         assert isinstance(self.criterion, ContrastiveLoss)
+        assert len(qfeats) == len(qlabels)
+        assert len(gfeats) == len(glabels)
         # pair-wise losses which take pair samples as input.
         qpos_score, qneg_score = self.sample_pairs(
-            sim_mat, qlabels, glabels)
+            sim_mat, glabels, qlabels)
         gpos_score, gneg_score = self.sample_pairs(
-            sim_mat.T, glabels, qlabels)
+            sim_mat.T, qlabels, glabels)
 
         qloss = self.criterion(
             similarity_to_distance(qpos_score),
@@ -344,11 +346,14 @@ class DecoderGraph(nn.Module):
 
     def compute_loss(self, sim_mat, qfeats, gfeats, qlabels, glabels):
         if isinstance(self.criterion, (ContrastiveLoss, TripletLoss)):
+
+            assert len(qfeats) == len(qlabels)
+            assert len(gfeats) == len(glabels)
             # pair-wise losses which take pair samples as input.
             qpos_score, qneg_score = self.sample_pairs(
-                sim_mat, qlabels, glabels)
+                sim_mat, glabels, qlabels)
             gpos_score, gneg_score = self.sample_pairs(
-                sim_mat.T, glabels, qlabels)
+                sim_mat.T, qlabels, glabels)
 
             qloss = self.criterion(
                 similarity_to_distance(qpos_score),
@@ -378,7 +383,7 @@ class DecoderGraph(nn.Module):
         return dict(graph_loss=loss)
 
     def forward(self, gfeats, qfeats,
-                qlabels=None, glabels=None,
+                glabels=None, qlabels=None,
                 eval_avg_sim=False, *args, **kwargs):
         """ [NxC] input for both features, return similarity matrix.
         """
