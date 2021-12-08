@@ -47,10 +47,21 @@ echo `date`, "start task"
 
 ## ----------------- PRW experiments of losses ------------------------
 
-python -m models.freeze_trainer --cfg configs/exps_freeze/exps_prw.closs_35.yml
-python -m evaluation.eval_graph exps/exps_freeze/exps_prw.closs_35
+# python -m models.freeze_trainer --cfg configs/exps_freeze/exps_prw.closs_35.yml
+# python -m evaluation.eval_graph exps/exps_freeze/exps_prw.closs_35
 
-python -m models.freeze_trainer --cfg configs/exps_freeze/exps_prw.closs_50.yml
-python -m evaluation.eval_graph exps/exps_freeze/exps_prw.closs_50
+# python -m models.freeze_trainer --cfg configs/exps_freeze/exps_prw.closs_50.yml
+# python -m evaluation.eval_graph exps/exps_freeze/exps_prw.closs_50
+
+## ----------------- Bugs check: CUHK experiments of losses ------------
+
+# python -m models.freeze_trainer --cfg configs/exps_freeze/exps_cuhk.closs_35_new.yml
+python -m evaluation.eval_graph exps/exps_freeze/exps_cuhk.closs_35_new
+
+## ----------------- CUHK experiments of stack ------------------------
+
+# python -m models.freeze_trainer --cfg configs/exps_freeze/exps_cuhk.closs_35.stack2.yml
+# python -m evaluation.eval_graph exps/exps_freeze/exps_cuhk.closs_35.stack2
+
 
 echo `date`, "task finised"

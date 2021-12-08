@@ -1,0 +1,17 @@
+# freeze training experiments:
+# - CUHK-SYSU; 
+# - w/ ACAE
+# - frozen backbone
+# - contrastive loss
+
+train:
+  output_dir: exps/exps_acae/exps_cuhk.closs_35.new_validate
+  batch_size: 2
+  loss_weights:
+    loss_graph: 10.0
+model:
+  graph_head:
+    loss:
+      name: "contrastive"
+      margin: 0.35
+

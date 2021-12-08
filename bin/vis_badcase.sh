@@ -12,13 +12,13 @@
 #     --pkl1 exps/exps_cuhk.graph.lossw_101/checkpoint.pth.ctx.G0.4.eval.pkl \
 #     --pkl2 exps/exps_cuhk/checkpoint.pth.ctx.G0.4.eval.pkl
 
-python -m evaluation.badcase \
-    --pkl1 exps/exps_cuhk/checkpoint.pth.ctx.G0.4.eval.pkl \
-    --pkl2 exps/exps_acae/exps_cuhk.closs_35/checkpoint.pth.acae.G0.4.eval.pkl \
+# python -m evaluation.badcase \
+#     --pkl1 exps/exps_cuhk/checkpoint.pth.ctx.G0.4.eval.pkl \
+#     --pkl2 exps/exps_acae/exps_cuhk.closs_35/checkpoint.pth.acae.G0.4.eval.pkl \
 
-python -m evaluation.badcase \
-    --pkl1 exps/exps_acae/exps_cuhk.closs_35/checkpoint.pth.acae.G0.4.eval.pkl \
-    --pkl2 exps/exps_cuhk/checkpoint.pth.ctx.G0.4.eval.pkl \
+# python -m evaluation.badcase \
+#     --pkl1 exps/exps_acae/exps_cuhk.closs_35/checkpoint.pth.acae.G0.4.eval.pkl \
+#     --pkl2 exps/exps_cuhk/checkpoint.pth.ctx.G0.4.eval.pkl \
 
 # -------------------------- main_aps
 
@@ -48,3 +48,11 @@ python -m evaluation.badcase \
 # python -m evaluation.vis_attn \
 #     --pkl exps/exps_acae/exps_cuhk.closs_35/checkpoint.pth.acae.G0.4.eval.pkl \
 
+
+# ================================ PRW results
+
+python -m evaluation.badcase \
+    --pkl exps/exps_acae/exps_prw.closs_60/checkpoint.pth.acae.G0.4.eval.pkl
+
+python -m evaluation.badcase \
+    --pkl exps/exps_prw.oim/checkpoint.pth.ctx.G0.4.eval.pkl

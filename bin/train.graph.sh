@@ -48,7 +48,10 @@ echo `date`, "start task"
 # python -m models.graph_trainer --cfg configs/exps_acae/exps_prw.closs_35.yml
 # python -m evaluation.eval_graph exps/exps_acae/exps_prw.closs_35
 
-python -m models.graph_trainer --cfg configs/exps_acae/exps_prw.closs_50.yml
-python -m evaluation.eval_graph exps/exps_acae/exps_prw.closs_50
+# python -m models.graph_trainer --cfg configs/exps_acae/exps_prw.closs_50.yml
+# python -m evaluation.eval_graph exps/exps_acae/exps_prw.closs_50
+
+# python -m models.graph_trainer --cfg configs/exps_acae/exps_prw.closs_60.yml
+# python -m evaluation.eval_graph exps/exps_acae/exps_prw.closs_60
 
 echo `date`, "task finised"
