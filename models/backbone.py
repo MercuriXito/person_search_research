@@ -184,11 +184,11 @@ class MSBoxHead(nn.Module):
 
         self.conv = nn.Sequential(
             nn.Conv2d(in_channels, representation_size, 3, 1, 1),
-            nn.ReLU(True),
             nn.BatchNorm2d(representation_size),
+            nn.ReLU(True),
             nn.Conv2d(representation_size, representation_size, 3, 1, 1),
-            nn.ReLU(True),
             nn.BatchNorm2d(representation_size),
+            nn.ReLU(True),
             nn.Conv2d(representation_size, self.out_channels[-1], 3, 1, 1)
         )
 
@@ -301,3 +301,32 @@ def build_faster_rcnn_based_multi_scale_backbone(
         return_res4, GAP
     )
     return stem, head
+
+
+def build_fpn_backbone(
+        backbone_name, pretrained, norm_layer="bn"):
+
+    assert backbone_name in __all__, f"{backbone_name} not found."
+    norm_layer = get_norm_layer(norm_layer)
+    backbone = getattr(torchvision.models, backbone_name)(
+        pretrained=pretrained,
+        norm_layer=norm_layer
+    )
+
+    # freeze layers
+    backbone.conv1.weight.requires_grad_(False)
+    backbone.bn1.weight.requires_grad_(False)
+    backbone.bn1.bias.requires_grad_(False)
+
+    stem = BackboneWithFPN(
+        backbone,
+        return_layers=dict(
+            layer1="feat_res2",
+            layer2="feat_res3",
+            layer3="feat_res4",
+            layer4="feat_res5"
+        ),
+        in_channels_list=[256, 512, 1024, 2048],
+        out_channels=256,
+    )
+    return stem
