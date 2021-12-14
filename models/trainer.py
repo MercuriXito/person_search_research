@@ -13,7 +13,9 @@ from torch.utils.data.dataloader import DataLoader
 from torch.utils.data.sampler import RandomSampler, BatchSampler
 
 # from models.baseline import build_faster_rcnn_based_models
-from models.baseline_fpn import build_faster_rcnn_based_models
+# from models.baseline_fpn import build_faster_rcnn_based_models
+# from models.baseline_one_stage import build_retinanet_based_model
+from models.baseline_retinanet import build_retina_net
 from datasets import build_trainset
 import utils.misc as utils
 from utils.logger import MetricLogger
@@ -88,7 +90,7 @@ def main(args):
     )
 
     # build model
-    model = build_faster_rcnn_based_models(args)
+    model = build_retina_net(args)
     model.to(device)
 
     # build optimizer

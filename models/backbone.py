@@ -10,6 +10,7 @@ from torchvision.models.detection.backbone_utils import FeaturePyramidNetwork, \
     BackboneWithFPN
 from torchvision.models.detection.faster_rcnn import TwoMLPHead
 from torchvision.models.resnet import __all__
+from torchvision.ops.feature_pyramid_network import LastLevelP6P7
 
 
 class FrozenBatchNorm1d(nn.Module):
@@ -318,15 +319,20 @@ def build_fpn_backbone(
     backbone.bn1.weight.requires_grad_(False)
     backbone.bn1.bias.requires_grad_(False)
 
-    stem = BackboneWithFPN(
+    body = IntermediateLayerGetter(
         backbone,
         return_layers=dict(
-            layer1="feat_res2",
             layer2="feat_res3",
             layer3="feat_res4",
             layer4="feat_res5"
-        ),
-        in_channels_list=[256, 512, 1024, 2048],
+        ))
+
+    fpn = FeaturePyramidNetwork(
+        in_channels_list=[512, 1024, 2048],
         out_channels=256,
+        extra_blocks=LastLevelP6P7(256, 256)
     )
-    return stem
+
+    modules = nn.Sequential(body, fpn)
+    setattr(modules, "out_channels", 256)
+    return modules

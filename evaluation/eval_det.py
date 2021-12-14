@@ -8,6 +8,8 @@ from torchvision.models.detection.faster_rcnn import fasterrcnn_resnet50_fpn
 from models.baseline_fpn import build_faster_rcnn_based_models
 
 from configs.faster_rcnn_default_configs import get_default_cfg
+# from models.baseline_one_stage import build_retinanet_based_model
+from models.baseline_retinanet import build_retina_net
 from utils.misc import ship_to_cuda
 from datasets import load_eval_datasets
 from evaluation.eval import Person_Search_Features_Extractor
@@ -79,7 +81,8 @@ def main():
     )
     # HACK configuration.
     # model = fasterrcnn_resnet50_fpn(**model_args)
-    model = build_faster_rcnn_based_models(t_args)
+    # model = build_faster_rcnn_based_models(t_args)
+    model = build_retina_net(t_args)
     model.eval()
     model.load_state_dict(
         torch.load(
