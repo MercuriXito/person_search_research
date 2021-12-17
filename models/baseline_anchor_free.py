@@ -21,6 +21,9 @@ def _area(boxes):
 def encode_centerness(regression):
     assert regression.ndim == 2
 
+    clip = math.log(1000. / 16)
+    regression = torch.clamp(regression, max=clip)  # log/exp encoding
+    regression = torch.exp(regression)
     left = regression[..., 0]
     top = regression[..., 1]
     right = regression[..., 2]
@@ -61,26 +64,79 @@ def sigmoid_focal_loss(
         return loss
 
 
+def iou_loss(proposals, target_boxes, eps=1e-6):
+    """ IouLoss
+    """
+    assert proposals.shape == target_boxes.shape
+
+    # Nx4x2
+    boxes = torch.stack([proposals, target_boxes], dim=-1)
+
+    inter_x1 = torch.max(boxes[:, 0], dim=-1)[0]
+    inter_y1 = torch.max(boxes[:, 1], dim=-1)[0]
+    inter_x2 = torch.min(boxes[:, 2], dim=-1)[0]
+    inter_y2 = torch.min(boxes[:, 3], dim=-1)[0]
+
+    inter = torch.relu(inter_x2 - inter_x1) * \
+        torch.relu(inter_y2 - inter_y1)
+    area_a = _area(proposals)
+    area_b = _area(target_boxes)
+
+    iou = inter / (area_a + area_b - inter + eps)
+
+    loss = 1 - iou
+    return loss
+
+
+def giou_loss(proposals, target_boxes, eps=1e-6):
+    assert proposals.shape == target_boxes.shape
+
+    # Nx4x2
+    boxes = torch.stack([proposals, target_boxes], dim=-1)
+
+    inter_x1 = torch.max(boxes[:, 0], dim=-1)[0]
+    inter_y1 = torch.max(boxes[:, 1], dim=-1)[0]
+    inter_x2 = torch.min(boxes[:, 2], dim=-1)[0]
+    inter_y2 = torch.min(boxes[:, 3], dim=-1)[0]
+
+    inter = torch.relu(inter_x2 - inter_x1) * \
+        torch.relu(inter_y2 - inter_y1)
+    area_a = _area(proposals)
+    area_b = _area(target_boxes)
+    union = area_a + area_b - inter
+
+    closure_x1 = torch.min(boxes[:, 0], dim=-1)[0]
+    closure_y1 = torch.min(boxes[:, 1], dim=-1)[0]
+    closure_x2 = torch.max(boxes[:, 2], dim=-1)[0]
+    closure_y2 = torch.max(boxes[:, 3], dim=-1)[0]
+    closure = torch.relu(closure_x2 - closure_x1) * \
+        torch.relu(closure_y2 - closure_y1)
+
+    giou = (inter / (union + eps)) - ((closure - union) / (closure + eps))
+    loss = 1 - giou
+    return loss
+
+
 class FCOSBoxCoder(BoxCoder):
     """ Box Encoder and Decoder as defined in FCOS method.
     Different from anchor based methods, boxes are decoded with points
     and relative codes. Boxes in x1y1x2y2 format. Codes in ltrb format.
     """
-    def __init__(self, weights) -> None:
-        super().__init__(weights, bbox_xform_clip=None)
+    def __init__(self, weights, bbox_xform_clip=math.log(1000. / 16)):
+        super().__init__(weights, bbox_xform_clip=bbox_xform_clip)
 
-    def encode(self, reference_points, proposals, image_shapes):
+    def encode(self, proposals, reference_points, image_shapes):
+        # List[Tensor], List[Tensor] -> List[Tensor]
         assert isinstance(reference_points, (list, tuple))
         assert isinstance(proposals, (list, tuple))
 
         boxes_per_image = [len(b) for b in reference_points]
         reference_boxes = torch.cat(reference_points, dim=0)
         proposals = torch.cat(proposals, dim=0)
-        targets = self.encode_single(reference_boxes, proposals, image_shapes)
+        targets = self.encode_single(proposals, reference_boxes, image_shapes)
         return targets.split(boxes_per_image, 0)
 
     def encode_single(self, proposals, reference_points, image_shapes):
-
         image_height, image_width = image_shapes
 
         x1 = proposals[:, 0]
@@ -95,7 +151,10 @@ class FCOSBoxCoder(BoxCoder):
         top = (cy - y1) * wt / image_height
         right = (x2 - cx) * wr / image_width
         bottom = (y2 - cy) * wb / image_height
-        return torch.stack([left, top, right, bottom], dim=1)
+
+        offset = torch.stack([left, top, right, bottom], dim=1)
+        offset = torch.log(offset)  # log/exp encoding
+        return offset
 
     def decode(self, rel_codes, points, image_shapes):
         assert isinstance(rel_codes, (list, tuple))
@@ -115,6 +174,8 @@ class FCOSBoxCoder(BoxCoder):
         points = points.to(rel_codes.dtype)
         x, y = points[:, 0][..., None], points[:, 1][..., None]
 
+        rel_codes = torch.clamp(rel_codes, max=self.bbox_xform_clip)  # log/exp encoding
+        rel_codes = torch.exp(rel_codes)
         wl, wt, wr, wb = self.weights
         left = rel_codes[:, 0::4] / wl * image_width
         top = rel_codes[:, 1::4] / wt * image_height
@@ -292,13 +353,24 @@ class FCOSRegressionHead(nn.Module):
                 torch.nn.init.normal_(layer.weight, std=0.01)
                 torch.nn.init.zeros_(layer.bias)
         self.box_coder = FCOSBoxCoder(weights=(1.0, 1.0, 1.0, 1.0))
+        # constrained strides suggested in fcos
+        self.strides = torch.tensor([0, 64, 128, 256, 512, torch.iinfo(torch.int).max], dtype=torch.long)
+        self.constrain = False
 
-    def compute_loss(self, targets, head_outputs, points, matched_idxs, image_shapes):
+    def compute_loss(self, targets, head_outputs, points, matched_idxs, image_shapes, feats_shape):
         losses = []
         bbox_regression = head_outputs['bbox_regression']
 
+        if self.constrain:
+            device = points.device
+            points_lvl_labels = torch.cat([
+                torch.full((shape, ), i, dtype=torch.long).to(device)
+                for i, shape in enumerate(feats_shape)
+            ])
+
         for targets_per_image, bbox_regression_per_image, points_per_image, matched_idxs_per_image, image_shape in \
                 zip(targets, bbox_regression, points, matched_idxs, image_shapes):
+
             # determine only the foreground indices, ignore the rest
             foreground_idxs_per_image = torch.where(matched_idxs_per_image >= 0)[0]
             num_foreground = foreground_idxs_per_image.numel()
@@ -308,17 +380,53 @@ class FCOSRegressionHead(nn.Module):
             bbox_regression_per_image = bbox_regression_per_image[foreground_idxs_per_image, :]
             points_per_image = points_per_image[foreground_idxs_per_image, :]
 
-            # compute the regression targets
-            target_regression = self.box_coder.encode_single(matched_gt_boxes_per_image, points_per_image, image_shape)
+            # use iou loss
+            proposals = self.box_coder.decode_single(bbox_regression_per_image, points_per_image, image_shape)
+            loss_iou = giou_loss(proposals, matched_gt_boxes_per_image).mean()
+            losses.append(loss_iou)
+            continue
 
-            # compute the loss
-            losses.append(torch.nn.functional.l1_loss(
-                bbox_regression_per_image,
-                target_regression,
-                reduction='sum'
-            ) / max(1, num_foreground))
+            # compute the regression targets
+            # target_regression = self.box_coder.encode_single(matched_gt_boxes_per_image, points_per_image, image_shape)
+
+            # if self.constrain:
+            #     target_lvl_labels = points_lvl_labels[foreground_idxs_per_image]
+            #     mask = self.constrain_matching(target_regression, target_lvl_labels, image_shape)
+            #     target_regression = target_regression[mask]
+            #     bbox_regression_per_image = bbox_regression_per_image[mask]
+
+            # # compute the loss
+            # losses.append(torch.nn.functional.l1_loss(
+            #     bbox_regression_per_image,
+            #     target_regression,
+            #     reduction='sum'
+            # ) / max(1, num_foreground))
 
         return _sum(losses) / max(1, len(targets))
+
+    def constrain_matching(self, target_regression, target_lvl_labels, image_shape):
+        """ Constrain the matching between ground-truth according to
+        the offset. Return the mask indicating the actual positive
+        samples after filtering.
+        """
+        device = target_lvl_labels.device
+        strides = self.strides.to(device)
+
+        # offset
+        width, height = image_shape
+        scales = torch.tensor([[width, height, width, height]]).to(target_regression)
+        target_regression = target_regression * scales
+        max_offset = target_regression.max(dim=1)[0]
+
+        min_pos_offset = strides[:-1][target_lvl_labels]
+        max_pos_offset = strides[1:][target_lvl_labels]
+
+        pos_mask = torch.logical_and(
+            max_offset >= min_pos_offset,
+            max_offset <= max_pos_offset,
+        )
+        assert torch.sum(pos_mask) > 0
+        return pos_mask
 
     def forward(self, x):
         # type: (List[Tensor]) -> Tensor
@@ -348,12 +456,11 @@ class FCOSHead(nn.Module):
         self.classification_head = FCOSClassificationHead(in_channels, num_classes)
         self.regression_head = FCOSRegressionHead(in_channels)
 
-    def compute_loss(self, targets, head_outputs, points, matched_idxs, image_shapes):
-        # type: (List[Dict[str, Tensor]], Dict[str, Tensor], List[Tensor], List[Tensor]) -> Dict[str, Tensor]
+    def compute_loss(self, targets, head_outputs, points, matched_idxs, image_shapes, feats_shapes):
         return {
             'loss_classifier': self.classification_head.compute_cls_loss(targets, head_outputs, matched_idxs),
             'loss_centerness': self.classification_head.compute_centerness_loss(targets, head_outputs, points, matched_idxs, image_shapes),
-            'loss_box_reg': self.regression_head.compute_loss(targets, head_outputs, points, matched_idxs, image_shapes),
+            'loss_box_reg': self.regression_head.compute_loss(targets, head_outputs, points, matched_idxs, image_shapes, feats_shapes),
         }
 
     def forward(self, x):
@@ -389,7 +496,7 @@ class AnchorFreePS(nn.Module):
         self.nms_thresh = nms_thresh
         self.detections_per_img = detections_per_img
 
-    def forward(self, images, targets=None):
+    def forward(self, images, targets=None, debug=False):
         """
         args:
             - image: List[Tensor]
@@ -412,16 +519,21 @@ class AnchorFreePS(nn.Module):
         points, feats_shapes, feats_strids = \
             self.reference_points(images, features)
 
+        detections, loss = [], []
         if self.training:
             loss, matched_idxs = \
-                self.compute_loss(points, head_outputs, targets, images.image_sizes)
-            return None, loss
+                self.compute_loss(points, head_outputs, targets, images.image_sizes, feats_shapes)
+            detections = head_outputs
         else:
             detections = self.postprocess(points, head_outputs, feats_shapes, images.image_sizes)
             detections = self.transform.postprocess(detections, images.image_sizes, original_image_sizes)
-            return detections, points, feats_shapes, head_outputs
 
-    def compute_loss(self, points, head_outputs, targets, image_shapes):
+        if debug:
+            feats_sizes = [list(s.shape[-2:]) for s in features]
+            return detections, points, feats_shapes, feats_sizes, head_outputs, loss
+        return detections, loss
+
+    def compute_loss(self, points, head_outputs, targets, image_shapes, feats_shapes):
         # TODO: constraint the matching of groud-truth boxes for points on
         # different level of features
         device = points.device
@@ -432,11 +544,11 @@ class AnchorFreePS(nn.Module):
             boxes = target_per_img["boxes"].unsqueeze(dim=0)
             points_per_img = points_per_img.unsqueeze(dim=1)
 
-            # in boxes
-            left_cond = points_per_img[..., 0] >= boxes[..., 0]
-            right_cond = points_per_img[..., 0] <= boxes[..., 2]
-            top_cond = points_per_img[..., 1] >= boxes[..., 1]
-            bottom_cond = points_per_img[..., 1] <= boxes[..., 3]
+            # in boxes, strictly
+            left_cond = points_per_img[..., 0] > boxes[..., 0]
+            right_cond = points_per_img[..., 0] < boxes[..., 2]
+            top_cond = points_per_img[..., 1] > boxes[..., 1]
+            bottom_cond = points_per_img[..., 1] < boxes[..., 3]
 
             width_cond = torch.logical_and(left_cond, right_cond)
             height_cond = torch.logical_and(top_cond, bottom_cond)
@@ -455,7 +567,7 @@ class AnchorFreePS(nn.Module):
             all_matched_idxs.append(matched_idxs)
 
         loss = self.fcos_head.compute_loss(
-            targets, head_outputs, points, all_matched_idxs, image_shapes)
+            targets, head_outputs, points, all_matched_idxs, image_shapes, feats_shapes)
         return loss, all_matched_idxs
 
     def postprocess(self, points, head_outputs, feats_shapes, image_shapes):
@@ -484,6 +596,8 @@ class AnchorFreePS(nn.Module):
 
                 # remove low scoring boxes
                 scores_per_level = torch.sigmoid(cls_level).flatten()
+                centerness_per_level = torch.sigmoid(cet_level).flatten()
+                scores_per_level = scores_per_level * centerness_per_level
                 keep_idxs = scores_per_level > self.score_thresh
                 scores_per_level = scores_per_level[keep_idxs]
                 topk_idxs = torch.where(keep_idxs)[0]
@@ -543,6 +657,10 @@ class AnchorFreePS(nn.Module):
         points = points.expand(2, -1, -1)
         return points, feats_shapes, feats_strides
 
+    @torch.no_grad()
+    def extract_features_without_boxes(self, images):
+        return self.forward(images)[0]
+
 
 def build_anchor_free_based_models(args):
 
@@ -592,7 +710,7 @@ if __name__ == '__main__':
 
     model = build_anchor_free_based_models(args)
     model.load_state_dict(
-        torch.load("exps/exps_det/exps_fcos.det/checkpoint.pth", map_location="cpu")["model"]
+        torch.load("exps/exps_det/exps_fcos.det.giou_loss/checkpoint.pth", map_location="cpu")["model"]
     )
     model.to(device)
     model.eval()
@@ -603,6 +721,9 @@ if __name__ == '__main__':
 
     from IPython import embed
     embed()
+
+    # iou_loss(boxes[:num], target_boxes)
+    # giou_loss(boxes[:num], target_boxes)
 
     # import cv2
     # from utils.vis import draw_boxes_text
@@ -615,55 +736,7 @@ if __name__ == '__main__':
     #     scores = outs["scores"]
 
     #     keep = scores > det_thresh
-    #     boxes = boxes[:5]
+    #     # boxes = boxes[:5]
 
     #     dimg = draw_boxes_text(image, boxes)
-    #     print(cv2.imwrite(f"exps/vis/fcos_det_{target['im_name']}", dimg))
-
-    if True:
-        import cv2
-        import matplotlib.pyplot as plt
-        import numpy as np
-
-        detections, points, feats_shapes, head_outputs = outputs
-
-        for idx, (dets, pts, shape, image, target) in \
-                enumerate(zip(detections, points, feats_shapes, images, targets)):
-
-            ih, iw = image.shape[-2:]
-            boxes = dets["boxes"]
-            scores = dets["scores"]
-
-            lvl_points = pts.split(shape)[0]
-            cls_scores = head_outputs["cls_logits"][0]
-            lvl_cls_scores = cls_scores.split(shape)[0]
-            lvl_cls_scores = torch.sigmoid(lvl_cls_scores)
-
-            stride = 2 ** (0 + 3)
-            lvl_points = (lvl_points - stride // 2) // stride
-            lvl_points = lvl_points.type(torch.long)
-            w, h = lvl_points[-1]
-
-            lvl_cls_scores = lvl_cls_scores.reshape(h + 1, w + 1)
-            lvl_cls_scores = lvl_cls_scores.detach().cpu().numpy()
-            lvl_cls_scores = np.resize(lvl_cls_scores, (ih, iw))
-
-            scores = lvl_cls_scores
-            scores = (scores - scores.min()) / (scores.max() - scores.min())
-
-            # prcoess image
-            cimage = image.detach().cpu().numpy().transpose(1, 2, 0)
-            cimage = np.clip(cimage, 0, 1) * 255.0
-
-            # process heatmap
-            scores = np.clip(scores, 0, 1) * 255.0
-            scores = scores.astype(np.uint8)
-            scores = cv2.applyColorMap(scores, cv2.COLORMAP_JET)
-
-            cimage = cimage * 0.6 + scores * 0.4
-            cimage = cimage.astype(np.uint8)
-
-            # RGB2BGR
-            cimage = cv2.cvtColor(cimage, cv2.COLOR_RGB2BGR)
-
-            print(cv2.imwrite(f"exps/vis/fcos_{target['im_name']}", cimage))
+    #     print(cv2.imwrite(f"exps/vis/fcos/det_{target['im_name']}", dimg))
