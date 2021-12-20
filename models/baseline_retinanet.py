@@ -17,7 +17,7 @@ from torchvision.models.detection import _utils as det_utils
 from torchvision.models.detection.rpn import AnchorGenerator
 from torchvision.models.detection.transform import GeneralizedRCNNTransform
 from models.losses import OIMLoss
-from models.new_backbone import build_fpn_backbone
+from models.backbone import build_fpn_backbone
 from models.reid_head import ReIDEmbeddingHead
 
 
@@ -735,8 +735,7 @@ class RetinaNet(nn.Module):
 
                 # remove low scoring boxes
                 scores_per_level = torch.sigmoid(logits_per_level).flatten()
-                # keep_idxs = scores_per_level > self.score_thresh
-                keep_idxs = scores_per_level > 0.3
+                keep_idxs = scores_per_level > self.score_thresh
                 scores_per_level = scores_per_level[keep_idxs]
                 topk_idxs = torch.where(keep_idxs)[0]
 
@@ -982,39 +981,17 @@ def build_retina_net(args):
 
 
 if __name__ == '__main__':
-
-    from datasets.cuhk_sysu import CUHK_SYSU
-    import torchvision.transforms as T
-    from datasets.transforms import ToTensor
     from configs.faster_rcnn_default_configs import get_default_cfg
-    from easydict import EasyDict
     from utils.misc import ship_to_cuda
     from datasets import build_trainset
-    from torch.utils.data import DataLoader
-    from torch.utils.data.sampler import RandomSampler, BatchSampler
 
     args = get_default_cfg()
 
     root = "data/cuhk-sysu"
-    transforms = ToTensor()
-
-    # dataset = CUHK_SYSU(root, transforms, "train")
-    dataset = build_trainset("cuhk-sysu", root)
-
-    sampler = RandomSampler(dataset)
-    batch_sampler = BatchSampler(sampler, batch_size=4, drop_last=True)
-    dataloader = DataLoader(dataset, batch_sampler=batch_sampler, num_workers=4, collate_fn=lambda x: x)
+    dataset = build_trainset("cuhk-sysu", root, use_transform=False)
 
     image1, target1 = dataset[0]
     image2, target2 = dataset[1]
-
-    # image_mean = [0.485, 0.456, 0.406]
-    # image_std = [0.229, 0.224, 0.225]
-    # min_size = 1500
-    # max_size = 900
-    # transform = GeneralizedRCNNTransform(min_size, max_size, image_mean, image_std)
-
-    # images, targets = transform.forward([image1, image2], [target1, target2])
 
     device = "cuda"
     # device = "cpu"
@@ -1023,17 +1000,12 @@ if __name__ == '__main__':
     targets = [target1, target2]
     images, targets = ship_to_cuda(images, targets, device)
 
-    # draw boxes
-    # from utils.vis import draw_boxes_text
-    # for i in range(len(images.tensors)):
-    #     img = images.tensors[i]
-    #     boxes = targets[i]["boxes"]
-    #     draw_boxes_text(img, boxes)
-
+    # model
     model = build_retina_net(args)
     model.load_state_dict(
         torch.load(
-            "exps/exps_det/exps_retinanet.det/checkpoint.pth",
+            # "exps/exps_det/exps_retinanet.det/checkpoint.pth",
+            "exps/exps_det/exps_cuhk.retinanet/checkpoint0019.pth",
             map_location="cpu"
         )["model"],
         strict=False
@@ -1044,22 +1016,22 @@ if __name__ == '__main__':
     model.train()
 
     with torch.no_grad():
-        outputs = model(images, targets)
+        outputs, _ = model(images, targets)
 
     from IPython import embed
     embed()
 
-    # import cv2
-    # from utils.vis import draw_boxes_text
+    if False:
+        import os
+        import cv2
+        from utils.vis import draw_boxes_text
 
-    # det_thresh = 0.5
+        dirname = os.path.join("exps", "vis", "retinanet")
+        os.makedirs(dirname, exist_ok=True)
 
-    # for image, target, outs in zip(images, targets, outputs[0]):
-    #     boxes = outs["boxes"]
-    #     scores = outs["scores"]
+        for image, target, outs in zip(images, targets, outputs):
+            boxes = outs["boxes"]
+            scores = outs["scores"]
 
-    #     keep = scores > det_thresh
-    #     boxes = boxes[keep]
-
-    #     dimg = draw_boxes_text(image, boxes)
-    #     print(cv2.imwrite(f"exps/test/{target['im_name']}", dimg))
+            dimg = draw_boxes_text(image, boxes)
+            print(cv2.imwrite(os.path.join(dirname, f"det_{target['im_name']}"), dimg))
