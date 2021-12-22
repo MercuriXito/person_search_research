@@ -84,15 +84,15 @@ class PSRoIHead(nn.Module):
                 proposals: list,
                 image_shapes,
                 targets=None,
-                matched_idxs=None):
+                matched_idxs=None,
+                *args, **kwargs):
 
         if self.training:
             assert matched_idxs is not None
             features_shape = [list(feats.shape) for feats in features.values()]
             # feats_level_inds is required if using level_roi_pooling.
             proposals, labels, pid_labels, feats_level_inds = \
-                self.select_training_samples_test(proposals, targets, features_shape, matched_idxs)
-
+                self.select_train_samples_gt(proposals, targets, features_shape, matched_idxs)
         num_imgs = len(proposals)
         # roi_features = self.level_roi_pooling(features, proposals, feats_level_inds)
         roi_features = self.mbox_head(features, proposals, image_shapes)
@@ -178,11 +178,9 @@ class PSRoIHead(nn.Module):
             self, proposals, targets, features_shape, matched_idxs):
         """ Only sample ground-truth boxes, suggested in DMR-Net.
         """
-        boxes, labels, pid_labels = [], [], []
-
-        boxes = self.add_gt_proposals(boxes, targets)
-        labels = self.add_gt_labels(labels, targets)
-        pid_labels = self.add_gt_pid_labels(pid_labels, targets)
+        boxes = [target["boxes"] for target in targets]
+        labels = [target["labels"]for target in targets]
+        pid_labels = [target["pid_labels"] for target in targets]
         feats_level = []
         return boxes, labels, pid_labels, feats_level
 
@@ -854,7 +852,7 @@ class RetinaNet(nn.Module):
             proposals = proposals.view(len(anchors), -1, 4).unbind(dim=0)
             ps_outs, ps_loss = self.ps_roi_head.forward(
                 features, proposals, images.image_sizes,
-                targets, matched_idxs=matched_idxs)
+                targets, matched_idxs=matched_idxs, images=images)
             losses.update(detection_losses)
             losses.update(ps_loss)
         else:
@@ -980,6 +978,15 @@ def build_retina_net(args):
     return network
 
 
+def search_image_indices_by_pid(dataset, pid_label):
+    indices = []
+    for idx in range(len(dataset)):
+        plabels = dataset.record[idx]["gt_pids"]
+        if pid_label in list(plabels):
+            indices.append(idx)
+    return indices
+
+
 if __name__ == '__main__':
     from configs.faster_rcnn_default_configs import get_default_cfg
     from utils.misc import ship_to_cuda
@@ -987,17 +994,20 @@ if __name__ == '__main__':
 
     args = get_default_cfg()
 
-    root = "data/cuhk-sysu"
-    dataset = build_trainset("cuhk-sysu", root, use_transform=False)
-
-    image1, target1 = dataset[0]
-    image2, target2 = dataset[1]
-
     device = "cuda"
     # device = "cpu"
     device = torch.device(device)
-    images = [image1, image2]
-    targets = [target1, target2]
+
+    root = "data/cuhk-sysu"
+    dataset = build_trainset("cuhk-sysu", root, use_transform=False)
+
+    indices = search_image_indices_by_pid(dataset, 1101)
+    images, targets = [], []
+
+    for idx in indices[:2]:
+        item = dataset[idx]
+        images.append(item[0])
+        targets.append(item[1])
     images, targets = ship_to_cuda(images, targets, device)
 
     # model
