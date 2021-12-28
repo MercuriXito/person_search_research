@@ -837,7 +837,7 @@ class RetinaNet(nn.Module):
         # create the set of anchors
         anchors = self.anchor_generator(images, features_list)
 
-        assert isinstance(self.ps_roi_head, PSRoIHead)
+        # assert isinstance(self.ps_roi_head, PSRoIHead)
 
         losses = {}
         detections: List[Dict[str, Tensor]] = []
@@ -894,7 +894,7 @@ class RetinaNet(nn.Module):
         features_dict = self.backbone(images.tensors)
 
         proposals = [target["boxes"] for target in targets]
-        assert isinstance(self.ps_roi_head, PSRoIHead)
+        # assert isinstance(self.ps_roi_head, PSRoIHead)
         roi_res, _ = self.ps_roi_head.forward(
             features_dict, proposals, images.image_sizes)
 

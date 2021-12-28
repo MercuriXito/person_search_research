@@ -3,7 +3,9 @@ import os
 from models.graph_net import build_graph_net
 
 from utils.misc import pickle
-from models.baseline import build_faster_rcnn_based_models
+# from models.baseline import build_faster_rcnn_based_models
+from models.baseline_retinanet import build_retina_net
+from models.baseline_retinanet_reid import build_fuse_retina_reid
 from configs.faster_rcnn_default_configs import get_default_cfg
 from evaluation.eval import FasterRCNNExtractor, evaluate
 from evaluation.evaluator import PersonSearchEvaluator
@@ -37,7 +39,7 @@ def build_and_load_from_dir(exp_dir, dst_eval_file=""):
     if t_args.model.graph_head.use_graph:
         model = build_graph_net(t_args)
     else:
-        model = build_faster_rcnn_based_models(t_args)
+        model = build_fuse_retina_reid(t_args)
 
     # HACK: checkpoint
     checkpoint_path = os.path.join(exp_dir, eval_args.checkpoint)

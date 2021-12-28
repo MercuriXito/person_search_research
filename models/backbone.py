@@ -226,7 +226,11 @@ class MSTwoMLPHead(nn.Module):
         feat = F.relu(self.fc7(feat))
 
         if self.GAP:
-            x = F.adaptive_max_pool2d(x, 1).flatten(start_dim=1)
+            # TODO: change AdaMaxPool2d to AdaAvgPool2d.
+            if x.numel() == 0:
+                x = F.adaptive_avg_pool2d(x, 1).flatten(start_dim=1)
+            else:
+                x = F.adaptive_max_pool2d(x, 1).flatten(start_dim=1)
         if self.return_res4:
             return OrderedDict([
                 ['feat_res4', x],  # Global average pooling

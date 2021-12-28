@@ -1,4 +1,3 @@
-import warnings
 import torch
 import torch.nn.functional as F
 
@@ -165,13 +164,6 @@ class BaseFPNNet(GeneralizedRCNN):
 
 def build_faster_rcnn_based_models(args):
 
-    # multi_scale 其实只影响两点: (1) box_head 的输出； (2) reid_head 的 feature 计算
-    if hasattr(args.model, "use_multi_scale") and args.model.use_multi_scale:
-        warnings.warn("Multi Scale not for FPN based model, set to False.")
-        args.defrost()
-        args.model.use_multi_scale = False
-        args.freeze()
-
     min_size = 800
     max_size = 1333
 
@@ -230,6 +222,7 @@ def build_faster_rcnn_based_models(args):
     rpn_anchor_generator = AnchorGenerator(
         anchor_sizes, aspect_ratios
     )
+    # HACK: RPN only use the feat_res4 output.
     rpn_head = RPNHead(
         out_channels, rpn_anchor_generator.num_anchors_per_location()[0]
     )
@@ -247,7 +240,9 @@ def build_faster_rcnn_based_models(args):
         output_size=7,
         sampling_ratio=2)
 
-    representation_size = box_head.out_channels[-1]
+    # representation_size = 2048  # for feat_res4 outputs
+    # representation_size = 256  # for feat_res4 outputs
+    representation_size = 1024  # for feat_res4 outputs
     num_classes = 2
     box_predictor = FastRCNNPredictor(representation_size, num_classes)
 
@@ -260,10 +255,15 @@ def build_faster_rcnn_based_models(args):
     oim_loss = OIMLoss(num_features, num_pids, num_cq_size, oim_momentum, oim_scalar)
 
     # build reid head
-    # disable multi-scale features.
-    reid_head = ReIDEmbeddingHead(
-        featmap_names=['feat_res5'], in_channels=[box_head.out_channels[-1]],
-        dim=reid_feature_dim, feature_norm=True)
+    if use_multi_scale:
+        reid_head = ReIDEmbeddingHead(
+            featmap_names=["feat_res4", "feat_res5"],
+            in_channels=[256, representation_size],
+            dim=reid_feature_dim, feature_norm=True)
+    else:
+        reid_head = ReIDEmbeddingHead(
+            featmap_names=['feat_res5'], in_channels=[256],
+            dim=reid_feature_dim, feature_norm=True)
 
     roi_head = PSRoIHead(
         box_roi_pool, box_head, box_predictor,
@@ -320,8 +320,7 @@ if __name__ == '__main__':
     model = build_faster_rcnn_based_models(args)
     model.to(device)
 
-    with torch.no_grad():
-        outputs = model(images, targets)
+    outputs = model(images, targets)
 
     from IPython import embed
     embed()
