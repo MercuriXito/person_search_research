@@ -62,6 +62,7 @@ class FuseRoiHead(PSRoIHead):
                 proposals,     # type: List[Tensor]
                 image_shapes,  # type: List[Tuple[int, int]]
                 targets=None,   # type: Optional[List[Dict[str, Tensor]]]
+                matched_idxs=None,
                 *args, **kwargs
                 ):
         """
@@ -72,11 +73,16 @@ class FuseRoiHead(PSRoIHead):
             targets (List[Dict])
         """
         if self.training:
-            proposals, _, labels, regression_targets, pid_labels\
-                = self.select_training_samples(proposals, targets)
+            # proposals, _, labels, regression_targets, pid_labels\
+            #     = self.select_training_samples(proposals, targets)
+            # use overwritten sampling method.
+            assert matched_idxs is not None
+            features_shape = [list(feats.shape) for feats in features.values()]
+            # feats_level_inds is required if using level_roi_pooling.
+            proposals, labels, pid_labels, feats_level_inds = \
+                self.select_training_samples(proposals, targets, features_shape, matched_idxs)
         else:
             labels = None
-            regression_targets = None
 
         box_features = self.box_roi_pool(features, proposals, image_shapes)
         box_features = self.box_head(box_features)
@@ -85,7 +91,7 @@ class FuseRoiHead(PSRoIHead):
         result = []
         losses = {}
         if self.training:
-            assert labels is not None and regression_targets is not None
+            assert labels is not None
             num_persons_per_images = [len(proposal) for proposal in proposals]
             num_images = len(num_persons_per_images)
             loss_oim = self.oim_loss(embeddings, pid_labels)
@@ -116,6 +122,62 @@ class FuseRoiHead(PSRoIHead):
                 )
 
         return result, losses
+
+    def select_training_samples(
+            self, proposals, targets, features_shape, matched_idxs):
+        device = proposals[0].device
+
+        spatial_sizes = [x[-1] * x[-2] for x in features_shape]
+        num_anchors_per_location = proposals[0].shape[0] // sum(spatial_sizes)
+        split_sizes = [s * num_anchors_per_location for s in spatial_sizes]
+        start_points = [0]
+        for idx in range(len(split_sizes) - 1):
+            start_points.append(start_points[-1] + split_sizes[idx])
+        start_points = torch.tensor(start_points).view(1, -1).to(device)
+
+        # K-sampling for each instance
+        sampled_inds = self.k_sampling(matched_idxs)
+
+        boxes, labels, pid_labels = [], [], []
+        feats_level = []  # level of features of each sampled boxes.
+
+        for matched_idxs_per_image, boxes_per_image, targets_per_image, sample_inds_img in \
+                zip(matched_idxs, proposals, targets, sampled_inds):
+
+            num_boxes = len(sample_inds_img)
+            boxes_per_image = boxes_per_image[sample_inds_img, :]
+            fg_idxs_in_sampled = torch.where(
+                matched_idxs_per_image[sample_inds_img] >= 0)
+            fg_idxs = sample_inds_img[fg_idxs_in_sampled]
+
+            # sampled labels
+            matched_labels = torch.zeros((num_boxes, ), dtype=torch.long).to(device)
+            matched_labels[fg_idxs_in_sampled] = \
+                targets_per_image["labels"][matched_idxs_per_image[fg_idxs]]
+
+            # sampled person labels
+            matched_pid_labels = torch.zeros((num_boxes, ), dtype=torch.long).to(device)
+            matched_pid_labels[fg_idxs_in_sampled] = \
+                targets_per_image["pid_labels"][matched_idxs_per_image[fg_idxs]]
+
+            labels.append(matched_labels)
+            pid_labels.append(matched_pid_labels)
+            boxes.append(boxes_per_image)
+
+            # feature level of each
+            lvl_inds = torch.sum(
+                sample_inds_img.view(-1, 1) >= start_points, dim=1)
+            lvl_inds = lvl_inds - 1
+            lvl_inds = lvl_inds.type(torch.int)
+            feats_level.append(lvl_inds)
+
+        # append ground-truth
+        # boxes = self.add_gt_proposals(boxes, targets)
+        # labels = self.add_gt_labels(labels, targets)
+        # pid_labels = self.add_gt_pid_labels(pid_labels, targets)
+        # feats_level = self.add_gt_feats_level(feats_level, targets)
+
+        return boxes, labels, pid_labels, feats_level
 
 
 def build_fuse_retina_reid(args):

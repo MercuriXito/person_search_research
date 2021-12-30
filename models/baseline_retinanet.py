@@ -16,8 +16,10 @@ import torchvision.ops.boxes as box_ops
 from torchvision.models.detection import _utils as det_utils
 from torchvision.models.detection.rpn import AnchorGenerator
 from torchvision.models.detection.transform import GeneralizedRCNNTransform
+from torchvision.ops.poolers import MultiScaleRoIAlign
 from models.losses import OIMLoss
-from models.backbone import build_fpn_backbone
+from models.backbone import build_fpn_backbone, \
+    build_faster_rcnn_based_multi_scale_backbone
 from models.reid_head import ReIDEmbeddingHead
 
 
@@ -57,7 +59,8 @@ class BoxHead(nn.Module):
 
 class PSRoIHead(nn.Module):
     def __init__(
-            self, mode,
+            self,
+            box_roi_pool,
             box_head,
             reid_embed_head,
             oim_loss,
@@ -68,16 +71,12 @@ class PSRoIHead(nn.Module):
               "sampling": use gt boxes and sampled generated boxes.
         """
         super().__init__()
-        self.mode = mode
         self.box_head = box_head
         self.reid_embed_head = reid_embed_head
         self.oim_loss = oim_loss
         self.use_k_sampling = use_k_sampling
         self.k = k
-        self.mbox_head = ops.MultiScaleRoIAlign(
-            featmap_names=["feat_res3", "feat_res4", "feat_res5", "p6", "p7"],
-            output_size=14, sampling_ratio=2
-        )
+        self.box_roi_pool = box_roi_pool
 
     def forward(self,
                 features: dict,
@@ -93,9 +92,10 @@ class PSRoIHead(nn.Module):
             # feats_level_inds is required if using level_roi_pooling.
             proposals, labels, pid_labels, feats_level_inds = \
                 self.select_train_samples_gt(proposals, targets, features_shape, matched_idxs)
+
         num_imgs = len(proposals)
         # roi_features = self.level_roi_pooling(features, proposals, feats_level_inds)
-        roi_features = self.mbox_head(features, proposals, image_shapes)
+        roi_features = self.box_roi_pool(features, proposals, image_shapes)
         roi_features = self.box_head(roi_features)
         embeddings, norms = self.reid_embed_head(roi_features)
 
@@ -915,7 +915,7 @@ class RetinaNet(nn.Module):
         return detections
 
 
-def build_retina_net(args):
+def build_retinanet_based_models(args):
 
     # build backbone
     backbone = build_fpn_backbone(
@@ -942,15 +942,25 @@ def build_retina_net(args):
     head = RetinaNetHead(256, 3, num_classes)
 
     # model parameters
-    # TODO: enable `use_multi_scale`
     use_multi_scale = args.model.use_multi_scale
     reid_feature_dim = args.model.reid_feature_dim
     # build person search head
-    box_head = BoxHead(256, 2048)
+    _, box_head = build_faster_rcnn_based_multi_scale_backbone(
+            args.model.backbone.name,
+            args.model.backbone.pretrained,
+            args.model.backbone.norm_layer,
+            return_res4=use_multi_scale)
     # build reid head
-    reid_head = ReIDEmbeddingHead(
-        featmap_names=['feat_res5'], in_channels=[2048],
-        dim=reid_feature_dim, feature_norm=True)
+    representation_size = 1024
+    if use_multi_scale:
+        reid_head = ReIDEmbeddingHead(
+            featmap_names=["feat_res4", "feat_res5"],
+            in_channels=[256, representation_size],
+            dim=reid_feature_dim, feature_norm=True)
+    else:
+        reid_head = ReIDEmbeddingHead(
+            featmap_names=['feat_res5'], in_channels=[256],
+            dim=reid_feature_dim, feature_norm=True)
     # build oim loss
     num_features = reid_feature_dim
     num_pids = args.loss.oim.num_pids
@@ -958,7 +968,14 @@ def build_retina_net(args):
     oim_momentum = args.loss.oim.oim_momentum
     oim_scalar = args.loss.oim.oim_scalar
     oim_loss = OIMLoss(num_features, num_pids, num_cq_size, oim_momentum, oim_scalar)
-    ps_roi_head = PSRoIHead("sampling", box_head, reid_head, oim_loss)
+
+    box_roi_pool = MultiScaleRoIAlign(
+        featmap_names=['feat_res3', 'feat_res4', 'feat_res5'],
+        output_size=7,
+        sampling_ratio=2)
+
+    ps_roi_head = PSRoIHead(
+            box_roi_pool, box_head, reid_head, oim_loss)
 
     network = RetinaNet(
         backbone, num_classes,
@@ -1011,11 +1028,12 @@ if __name__ == '__main__':
     images, targets = ship_to_cuda(images, targets, device)
 
     # model
-    model = build_retina_net(args)
-    model.load_state_dict(
+    model = build_retinanet_based_models(args)
+    mkeys, ukeys = model.load_state_dict(
         torch.load(
             # "exps/exps_det/exps_retinanet.det/checkpoint.pth",
-            "exps/exps_det/exps_cuhk.retinanet/checkpoint0019.pth",
+            # "exps/exps_det/exps_cuhk.retinanet/checkpoint0019.pth",
+            "exps/exps_det/exps_cuhk.retinanet.fpn_reid_head.sample/checkpoint0020.pth",
             map_location="cpu"
         )["model"],
         strict=False
@@ -1023,7 +1041,7 @@ if __name__ == '__main__':
 
     model.to(device)
     model.eval()
-    model.train()
+    # model.train()
 
     with torch.no_grad():
         outputs, _ = model(images, targets)

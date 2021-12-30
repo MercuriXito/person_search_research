@@ -9,7 +9,7 @@ from models.baseline_fpn import build_faster_rcnn_based_models
 
 from configs.faster_rcnn_default_configs import get_default_cfg
 # from models.baseline_one_stage import build_retinanet_based_model
-from models.baseline_retinanet import build_retina_net
+from models.baseline_retinanet import build_retinanet_based_models
 from models.baseline_anchor_free import build_anchor_free_based_models
 from utils.misc import ship_to_cuda
 from datasets import load_eval_datasets
@@ -83,7 +83,7 @@ def main():
     # HACK configuration.
     # model = fasterrcnn_resnet50_fpn(**model_args)
     # model = build_faster_rcnn_based_models(t_args)
-    # model = build_retina_net(t_args)
+    # model = build_retinanet_based_models(t_args)
     model = build_anchor_free_based_models(t_args)
     model.eval()
     model.load_state_dict(
