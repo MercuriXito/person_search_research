@@ -23,40 +23,6 @@ from models.backbone import build_fpn_backbone, \
 from models.reid_head import ReIDEmbeddingHead
 
 
-class BoxHead(nn.Module):
-    def __init__(self, in_channels, out_channels, num_layers=4):
-        super(BoxHead, self).__init__()
-        self.in_channels = in_channels
-        self.out_channels = out_channels
-        self.num_layers = num_layers
-        convs = []
-        for i in range(4):
-            convs.append(nn.Conv2d(in_channels, in_channels, 3, 1, 1))
-            convs.append(nn.BatchNorm2d(in_channels))
-            convs.append(nn.ReLU())
-        self.convs = nn.Sequential(*convs)
-        self.output = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, 3, 1, 1),
-            nn.AdaptiveAvgPool2d(1)
-        )
-        self._init_weights()
-
-    def _init_weights(self):
-        for layer in self.convs.children():
-            if isinstance(layer, nn.Conv2d):
-                torch.nn.init.normal_(layer.weight, std=0.01)
-                torch.nn.init.constant_(layer.bias, 0)
-        for layer in self.output.children():
-            if isinstance(layer, nn.Conv2d):
-                torch.nn.init.normal_(layer.weight, std=0.01)
-                torch.nn.init.constant_(layer.bias, 0)
-
-    def forward(self, box_features):
-        x = self.convs(box_features)
-        feats = self.output(x)
-        return {"feat_res5": feats}
-
-
 class PSRoIHead(nn.Module):
     def __init__(
             self,
@@ -91,7 +57,7 @@ class PSRoIHead(nn.Module):
             features_shape = [list(feats.shape) for feats in features.values()]
             # feats_level_inds is required if using level_roi_pooling.
             proposals, labels, pid_labels, feats_level_inds = \
-                self.select_train_samples_gt(proposals, targets, features_shape, matched_idxs)
+                self.select_gt_training_samples(proposals, targets, features_shape, matched_idxs)
 
         num_imgs = len(proposals)
         # roi_features = self.level_roi_pooling(features, proposals, feats_level_inds)
@@ -142,7 +108,7 @@ class PSRoIHead(nn.Module):
             roi_feats = torchvision.ops.roi_align(
                 feature, boxes_per_level,
                 output_size=14,
-                spatial_scale=2**(feat_idx+3),  # HACK: start from C2 feature
+                spatial_scale=float(1/(2**(feat_idx+3))),  # HACK: start from C2 feature
                 sampling_ratio=2,
             )
 
@@ -174,7 +140,7 @@ class PSRoIHead(nn.Module):
             sample_inds.append(sample_in_imgs)
         return sample_inds
 
-    def select_train_samples_gt(
+    def select_gt_training_samples(
             self, proposals, targets, features_shape, matched_idxs):
         """ Only sample ground-truth boxes, suggested in DMR-Net.
         """
