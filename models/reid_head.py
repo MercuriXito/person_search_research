@@ -1,6 +1,18 @@
 import torch
 import torch.nn as nn
 import torch.nn.init as init
+from collections import defaultdict
+
+from models.backbone import FrozenBatchNorm1d
+
+
+def get_norm_layer1d(norm_layer):
+    defined_norm_layers = defaultdict(lambda: nn.BatchNorm2d)
+    defined_norm_layers.update({
+        "bn": nn.BatchNorm1d,
+        "frozen_bn": FrozenBatchNorm1d
+    })
+    return defined_norm_layers[norm_layer]
 
 
 class ReIDEmbeddingHead(nn.Module):
@@ -8,11 +20,13 @@ class ReIDEmbeddingHead(nn.Module):
     def __init__(self, featmap_names=['feat_res5'],
                  in_channels=[2048],
                  dim=256,
-                 feature_norm=True):
+                 feature_norm=True,
+                 norm_layer="bn"):
         super(ReIDEmbeddingHead, self).__init__()
         self.featmap_names = featmap_names
         self.in_channels = list(map(int, in_channels))
         self.dim = int(dim)
+        norm_layer = get_norm_layer1d(norm_layer)
 
         self.projectors = nn.ModuleDict()
         indv_dims = self._split_embedding_dim()
@@ -20,14 +34,14 @@ class ReIDEmbeddingHead(nn.Module):
             indv_dim = int(indv_dim)
             proj = nn.Sequential(
                 nn.Linear(int(in_chennel), indv_dim),
-                nn.BatchNorm1d(indv_dim))
+                norm_layer(indv_dim))
             init.normal_(proj[0].weight, std=0.01)
             init.normal_(proj[1].weight, std=0.01)
             init.constant_(proj[0].bias, 0)
             init.constant_(proj[1].bias, 0)
             self.projectors[ftname] = proj
 
-        self.rescaler = nn.BatchNorm1d(1, affine=True)
+        self.rescaler = norm_layer(1)
         self.feature_norm = feature_norm
 
     def forward(self, featmaps):

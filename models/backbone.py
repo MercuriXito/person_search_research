@@ -6,6 +6,9 @@ import torch.nn.functional as F
 
 import torchvision
 from torchvision.models._utils import IntermediateLayerGetter
+from torchvision.models.detection.backbone_utils import FeaturePyramidNetwork, \
+    BackboneWithFPN
+from torchvision.models.detection.faster_rcnn import TwoMLPHead
 from torchvision.models.resnet import __all__
 
 
@@ -168,6 +171,70 @@ class RCNNConvHead(nn.Sequential):
             return OrderedDict([['feat_res5', feat]])
 
 
+class MSBoxHead(nn.Module):
+    def __init__(self, in_channels, representation_size,
+                 return_res4=True, GAP=True, *args, **kwargs):
+        super(MSBoxHead, self).__init__()
+        self.return_res4 = return_res4
+        if self.return_res4:
+            self.out_channels = [1024, 2048]
+        else:
+            self.out_channels = [2048]
+        self.GAP = GAP
+
+        self.conv = nn.Sequential(
+            nn.Conv2d(in_channels, representation_size, 3, 1, 1),
+            nn.ReLU(True),
+            nn.BatchNorm2d(representation_size),
+            nn.Conv2d(representation_size, representation_size, 3, 1, 1),
+            nn.ReLU(True),
+            nn.BatchNorm2d(representation_size),
+            nn.Conv2d(representation_size, self.out_channels[-1], 3, 1, 1)
+        )
+
+    def forward(self, x: torch.Tensor):
+        feat = self.conv(x)
+        if self.GAP:
+            x = F.adaptive_max_pool2d(x, 1)
+            feat = F.adaptive_max_pool2d(feat, 1)
+        if self.return_res4:
+            return OrderedDict([
+                ['feat_res4', x],  # Global average pooling
+                ['feat_res5', feat]]
+            )
+        else:
+            return OrderedDict([['feat_res5', feat]])
+
+
+class MSTwoMLPHead(nn.Module):
+    def __init__(self, in_channels, representation_size, resolution,
+                 return_res4=True, GAP=True, *args, **kwargs):
+        super(MSTwoMLPHead, self).__init__()
+        self.return_res4 = return_res4
+        if self.return_res4:
+            self.out_channels = [in_channels, representation_size]
+        else:
+            self.out_channels = [representation_size]
+        self.GAP = GAP
+        self.fc6 = nn.Linear(in_channels * resolution ** 2, representation_size)
+        self.fc7 = nn.Linear(representation_size, representation_size)
+
+    def forward(self, x):
+        feat = x.flatten(start_dim=1)
+        feat = F.relu(self.fc6(feat))
+        feat = F.relu(self.fc7(feat))
+
+        if self.GAP:
+            x = F.adaptive_max_pool2d(x, 1).flatten(start_dim=1)
+        if self.return_res4:
+            return OrderedDict([
+                ['feat_res4', x],  # Global average pooling
+                ['feat_res5', feat]]
+            )
+        else:
+            return OrderedDict([['feat_res5', feat]])
+
+
 def build_faster_rcnn_based_backbone(
         backbone_name, pretrained, norm_layer="bn",
         return_res4=False, GAP=True):
@@ -185,4 +252,52 @@ def build_faster_rcnn_based_backbone(
 
     stem = Backbone(backbone)
     head = RCNNConvHead(backbone, return_res4, GAP)
+    return stem, head
+
+
+def build_faster_rcnn_based_multi_scale_backbone(
+        backbone_name, pretrained,
+        use_fpn=False,
+        norm_layer="bn",
+        return_res4=False, GAP=True):
+
+    assert backbone_name in __all__, f"{backbone_name} not found."
+    # norm_layer = "frozen_bn"
+    norm_layer = get_norm_layer(norm_layer)
+    backbone = getattr(torchvision.models, backbone_name)(
+        pretrained=pretrained,
+        norm_layer=norm_layer
+    )
+
+    # freeze layers
+    backbone.conv1.weight.requires_grad_(False)
+    backbone.bn1.weight.requires_grad_(False)
+    backbone.bn1.bias.requires_grad_(False)
+
+    # # freeze the layer1
+    # for name, param in backbone.named_parameters():
+    #     if name.startswith("layer1"):
+    #         param.requires_grad_(False)
+
+    # split_stem = Backbone(backbone)
+    # head = RCNNConvHead(backbone, return_res4, GAP)
+    stem = BackboneWithFPN(
+        backbone,
+        return_layers=dict(
+            layer1="feat_res2",
+            layer2="feat_res3",
+            layer3="feat_res4",
+            layer4="feat_res5"
+        ),
+        in_channels_list=[256, 512, 1024, 2048],
+        out_channels=256,
+    )
+    # HACK: out_channel is fixed
+    setattr(stem, "out_channels", 256)
+    # head = MSBoxHead(
+    #     stem.out_channels, 1024, return_res4, GAP)
+    head = MSTwoMLPHead(
+        stem.out_channels, 1024, 7,
+        return_res4, GAP
+    )
     return stem, head

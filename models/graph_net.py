@@ -11,7 +11,7 @@ from models.losses import OIMLoss
 from models.reid_head import ReIDEmbeddingHead
 from models.backbone import build_faster_rcnn_based_backbone
 from models.baseline import BaseNet, PSRoIHead
-from models.ctx_attn_head import ImageFeaturesLut, build_graph_head
+from models.ctx_attn_head import ImageFeaturesLut, build_criterion_for_graph_head, build_graph_head
 
 
 class GraphNet(BaseNet):
@@ -138,15 +138,18 @@ def build_graph_net(args):
     oim_loss = OIMLoss(num_features, num_pids, num_cq_size, oim_momentum, oim_scalar)
 
     # build reid head
+    reid_head_norm_layer = args.model.reid_head.norm_layer
     if use_multi_scale:
         reid_head = ReIDEmbeddingHead(
             featmap_names=["feat_res4", "feat_res5"],
             in_channels=[1024, 2048],
-            dim=reid_feature_dim, feature_norm=True)
+            dim=reid_feature_dim, feature_norm=True,
+            norm_layer=reid_head_norm_layer)
     else:
         reid_head = ReIDEmbeddingHead(
             featmap_names=['feat_res5'], in_channels=[2048],
-            dim=reid_feature_dim, feature_norm=True)
+            dim=reid_feature_dim, feature_norm=True,
+            norm_layer=reid_head_norm_layer)
 
     roi_head = PSRoIHead(
         box_roi_pool, box_head, box_predictor,
@@ -166,12 +169,16 @@ def build_graph_net(args):
     )
 
     # build graph head
-    graph_loss = deepcopy(oim_loss)
+    # graph_loss = deepcopy(oim_loss)
+    graph_loss = build_criterion_for_graph_head(args.model.graph_head.loss)
     graph_stack = args.model.graph_head.num_graph_stack
     graph_nheads = args.model.graph_head.nheads
     graph_dropout = args.model.graph_head.dropout
+    graph_module = args.model.graph_head.graph_module
     graph_head = build_graph_head(
-        loss=graph_loss,
+        module=graph_module,
+        criterion=graph_loss,
+        num_pids=num_pids,
         reid_feature_dim=256,
         num_stack=graph_stack,
         nheads=graph_nheads,
@@ -233,6 +240,7 @@ if __name__ == '__main__':
     #     draw_boxes_text(img, boxes)
 
     model = build_graph_net(args)
+    # model.load_state_dict(torch.load("exps/exps_cuhk.graph/checkpoint.pth", map_location="cpu")["model"])
     model.to(device)
 
     # model.eval()

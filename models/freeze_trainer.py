@@ -12,6 +12,7 @@ import random
 from torch import optim
 from torch.utils.data.dataloader import DataLoader
 from torch.utils.data.sampler import RandomSampler, BatchSampler
+from yacs.config import CfgNode
 
 from models.ctx_attn_head import ImageFeaturesLut
 from models.graph_net import build_graph_net
@@ -69,6 +70,7 @@ def train_one_epoch(
 
         metric_logger.update(**loss_dict)
         metric_logger.update(loss=sum(list(loss_dict.values())).item())
+        metric_logger.update(total_loss=losses.item())
         metric_logger.update(grad_norm=grad_total_norm)
         torch.cuda.empty_cache()
     print("Averaged stats:", metric_logger)
@@ -99,7 +101,14 @@ def main(args):
     model.to(device)
 
     # build optimizer
-    optimizer = optim.AdamW(model.parameters(), lr=args.train.lr, weight_decay=args.train.weight_decay)
+    groups = []
+    for name, param in model.named_parameters():
+        if "graph_head" not in name:
+            param.requires_grad_(False)
+            continue
+        groups.append(param)
+    params = [{'params': groups}]
+    optimizer = optim.AdamW(params, lr=args.train.lr, weight_decay=args.train.weight_decay)
     lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, args.train.lr_drop_epochs)
 
     # load previous trained model
@@ -113,15 +122,11 @@ def main(args):
             print(f"Unexpected keys: {unexpected}")
         if len(missed) > 0:
             print(f"Missed keys: {missed}")
-
         # overwrite optimizer
         if "optimizer" in params and "lr_scheduler" in params and "epoch" in params:
             optimizer.load_state_dict(params["optimizer"])
             lr_scheduler.load_state_dict(params["lr_scheduler"])
             trained_epoch = params["epoch"]
-        # load lut
-        if "feats_lut" in params:
-            feats_lut = params["feats_lut"]
     else:
         print(f"checkpoint: {checkpoint_path} does not exists.")
     start_epoch = trained_epoch + 1
@@ -160,6 +165,31 @@ def main(args):
     print('Training time {}'.format(total_time_str))
 
 
+def modify_config_for_freeze_training(args):
+    print("Freeze training mode.")
+
+    args.defrost()
+    # freeze training loss
+    args.train.loss_weights.loss_classifier = 0.0
+    args.train.loss_weights.loss_box_reg = 0.0
+    args.train.loss_weights.loss_oim = 0.0
+    args.train.loss_weights.loss_objectness = 0.0
+    args.train.loss_weights.loss_rpn_box_reg = 0.0
+
+    # check all the norm_layer settings in model args
+    # HACK settings
+    if args.model.backbone.norm_layer != "frozen_bn":
+        args.model.backbone.norm_layer = "frozen_bn"
+        print("Setting backbone norm_layer to FrozenBN")
+    if args.model.reid_head.norm_layer != "frozen_bn":
+        args.model.reid_head.norm_layer = "frozen_bn"
+        print("Setting reid_head norm_layer to FrozenBN")
+
+    # freeze the backbone
+    args.freeze()
+    return args
+
+
 def get_configs():
     from configs.graph_net_default_configs \
         import get_default_cfg as get_graphnet_cfg
@@ -186,4 +216,5 @@ def get_configs():
 
 if __name__ == '__main__':
     args = get_configs()
+    args = modify_config_for_freeze_training(args)
     main(args)

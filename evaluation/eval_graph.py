@@ -2,7 +2,7 @@ import torch
 import os
 
 from utils.misc import pickle
-from evaluation.evaluator import GraphPSEvaluator
+from evaluation.evaluator import FastGraphPSEvaluator, GraphPSEvaluator
 from evaluation.eval import FasterRCNNExtractor, evaluate
 from evaluation.eval_defaults import build_and_load_from_dir \
     as build_and_load_from_dir
@@ -15,16 +15,27 @@ def main():
 
     parser = argparse.ArgumentParser()
     parser.add_argument("exp_dir")
+    parser.add_argument("--eval-config", default="", type=str)
     args = parser.parse_args()
 
-    model, t_args = build_and_load_from_dir(args.exp_dir)
+    model, t_args = build_and_load_from_dir(args.exp_dir, args.eval_config)
     eval_args = t_args.eval
     checkpoint_path = os.path.join(args.exp_dir, eval_args.checkpoint)
 
     device = torch.device(eval_args.device)
     extractor = FasterRCNNExtractor(model, device)
-    ps_evaluator = GraphPSEvaluator(model.graph_head, device, eval_args.dataset_file)
-    res_pkl, table_string = evaluate(extractor, eval_args, ps_evaluator=ps_evaluator)
+    if eval_args.use_fast_graph:
+        ps_evaluator = FastGraphPSEvaluator(
+            model.graph_head, device, eval_args.dataset_file,
+            topk=args.fast_graph_topk,
+            eval_all_sim=eval_args.eval_all_sim)
+    else:
+        ps_evaluator = GraphPSEvaluator(
+            model.graph_head, device, eval_args.dataset_file,
+            eval_all_sim=eval_args.eval_all_sim)
+
+    res_pkl, table_string = evaluate(
+        extractor, eval_args, ps_evaluator=ps_evaluator)
 
     # serealization
     prefix = "eval"

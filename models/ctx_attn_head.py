@@ -1,11 +1,71 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torchvision.ops.boxes as box_ops
 
 import random
 from collections import defaultdict
 
-from models.losses import OIMLoss
+from models.losses import CircleLoss, OIMLoss, ContrastiveLoss, TripletLoss
+
+
+def reshape_back(x):
+    return x.view(-1, x.size()[-1])
+
+
+def normalize(x, dim=2):
+    return F.normalize(x, p=2, dim=dim)
+
+
+def apply_all(func, *args):
+    res = []
+    for arg in args:
+        res.append(func(arg))
+    return res
+
+
+def mul(t1, t2):
+    return torch.matmul(t1, t2.T)
+
+
+def incremental_take(tensor, indices, dim):
+    """ similar to take_along_dim
+    """
+    assert indices.ndim == 1
+    assert tensor.ndim == 2, "only support 2-d tensor"
+
+    increment_indices = torch.arange(len(indices)).to(indices)
+    if dim == 0:
+        return tensor[indices, increment_indices]
+    else:
+        return tensor[increment_indices, indices]
+
+
+def similarity_to_distance(cos_sim):
+    return (1 - cos_sim) / 2
+
+
+def distance_to_similarity(dist):
+    return 1 - 2 * dist
+
+
+def build_criterion_for_graph_head(args):
+    print(f"{args.name} for Graph Head.")
+    if args.name == "contrastive":
+        criterion = ContrastiveLoss(margin=args.margin)
+    elif args.name == "triplet":
+        criterion = TripletLoss(margin=args.margin)
+    elif args.name == "circle":
+        criterion = CircleLoss(m=args.margin, gamma=args.circle_gamma)
+    else:
+        criterion = OIMLoss(
+            num_features=args.num_features,
+            num_pids=args.num_pids,
+            num_cq_size=args.num_cq_size,
+            oim_momentum=args.oim_momentum,
+            oim_scalar=args.oim_scalar,
+        )
+    return criterion
 
 
 # ------------------------------ Graph Head ---------------------------------
@@ -152,8 +212,8 @@ class ContextGraphHead(nn.Module):
                 outputs.append(scores)
                 losses.append(loss)
             else:
-                outputs.append(scores)
-        loss_graph = torch.stack([l["oim_loss"] for l in losses])
+                outputs.append(output)
+        loss_graph = torch.stack([l["graph_loss"] for l in losses])
         loss_graph = loss_graph.mean()
         losses = dict(loss_graph=loss_graph)
         return outputs, losses
@@ -162,14 +222,16 @@ class ContextGraphHead(nn.Module):
             self, gallery_embeddings,
             query_ctx_embedding,
             query_target_embedding,
-            graph_thred):
+            graph_thred,
+            eval_all_sim=False):
         reid_scores = torch.matmul(gallery_embeddings, query_target_embedding.T)
         if len(query_ctx_embedding) == 0:
             return reid_scores
 
         gfeats = gallery_embeddings
         qfeats = torch.cat([query_ctx_embedding, query_target_embedding])
-        sim_matrix = self.graph_head(gfeats, qfeats)
+        sim_matrix = self.graph_head(
+            gfeats, qfeats, eval_avg_sim=eval_all_sim)
         graph_scores = sim_matrix[:, -1][..., None]
 
         scores = graph_thred * graph_scores + (1 - graph_thred) * reid_scores
@@ -179,22 +241,22 @@ class ContextGraphHead(nn.Module):
 
 
 class DecoderGraph(nn.Module):
-    def __init__(self, loss,
+    def __init__(self, criterion, num_pids,
                  reid_feature_dim=256, num_stack=1,
                  nheads=4, dropout=0.0, *args, **kwargs):
         super().__init__()
 
         self.num_stack = num_stack
         self.feat_dim = reid_feature_dim
-        layer = nn.TransformerDecoderLayer
-        # layer = AttnGraphLayer
+        # layer = nn.TransformerDecoderLayer
+        layer = AttnGraphLayer
         self.heads = nn.ModuleList([
             layer(reid_feature_dim, nheads, reid_feature_dim, dropout=dropout)
             for i in range(self.num_stack)
         ])
-        self.loss = loss
-        assert isinstance(self.loss, OIMLoss)  # currently, only support OIMLoss
-        self.num_pids = 5532
+        self.criterion = criterion
+        # assert isinstance(self.criterion, OIMLoss)  # currently, only support OIMLoss
+        self.num_pids = num_pids
 
     def construct_gt_mask(self, qlabels, glabels):
         """ GT matching result for training.
@@ -215,36 +277,126 @@ class DecoderGraph(nn.Module):
         gt_mask[ignored_mask] = -1  # ignored value
         return gt_mask
 
+    def sample_pairs(self, sim_mat, qlabels, glabels):
+        m, n = len(qlabels), len(glabels)
+        match_mask = (qlabels.view(m, 1) == glabels.view(1, n))
+
+        # for match between unlabeled persons, just ignored.
+        q_ignored = (qlabels > self.num_pids)
+        g_ignored = (glabels > self.num_pids)
+        ignored_mask = torch.logical_and(
+            q_ignored.view(m, 1), g_ignored.view(1, n)
+        )
+        pos_pair_mask = torch.logical_and(
+            match_mask, torch.logical_not(ignored_mask)
+        )
+        neg_pair_mask = torch.logical_and(
+            torch.logical_not(match_mask),
+            torch.logical_not(ignored_mask)
+        )
+        pos_pair_mask = pos_pair_mask.type(torch.int)
+        neg_pair_mask = neg_pair_mask.type(torch.int)
+
+        # sample hard positive
+        pos_values = (sim_mat * pos_pair_mask) + (1 - pos_pair_mask) * \
+            (sim_mat.max(dim=1).values.unsqueeze(dim=1) + 1)
+        pos_inds = torch.argmin(pos_values, dim=1)
+        # sample hard negative
+        neg_values = (sim_mat * neg_pair_mask) + (1 - neg_pair_mask) * \
+            (-sim_mat.max(dim=1).values.unsqueeze(dim=1) - 1)
+        neg_inds = torch.argmax(neg_values, dim=1)
+
+        pos_score = incremental_take(sim_mat, pos_inds, 1)
+        neg_score = incremental_take(sim_mat, neg_inds, 1)
+        pos_valid = incremental_take(pos_pair_mask, pos_inds, 1)
+        neg_valid = incremental_take(neg_pair_mask, neg_inds, 1)
+
+        # mask invalid values
+        pos_score = pos_score * pos_valid.to(pos_score)
+        neg_score = neg_score * neg_valid.to(neg_score)
+        return pos_score, neg_score
+
+    def compute_loss(self, sim_mat, qfeats, gfeats, qlabels, glabels):
+        if isinstance(self.criterion, (ContrastiveLoss, TripletLoss)):
+            # pair-wise losses which take pair samples as input.
+            qpos_score, qneg_score = self.sample_pairs(
+                sim_mat, qlabels, glabels)
+            gpos_score, gneg_score = self.sample_pairs(
+                sim_mat.T, glabels, qlabels)
+
+            qloss = self.criterion(
+                similarity_to_distance(qpos_score),
+                similarity_to_distance(qneg_score))
+            gloss = self.criterion(
+                similarity_to_distance(gpos_score),
+                similarity_to_distance(gneg_score))
+            loss = (qloss + gloss) * 0.5
+        elif isinstance(self.criterion, (CircleLoss, )):
+            # pair-wise losses which take pair samples as input.
+            qpos_score, qneg_score = self.sample_pairs(
+                sim_mat, qlabels, glabels)
+            gpos_score, gneg_score = self.sample_pairs(
+                sim_mat.T, glabels, qlabels)
+            qloss = self.criterion(qpos_score / 2, qneg_score / 2)
+            gloss = self.criterion(gpos_score / 2, gneg_score / 2)
+            loss = (qloss + gloss) * 0.5
+        elif isinstance(self.criterion, (OIMLoss, )):
+            # feature-learning losses which take features and
+            # labels as input.
+            graph_feats = torch.cat([qfeats, gfeats])
+            graph_labels = [qlabels, glabels]
+            loss = self.criterion(graph_feats, graph_labels)
+        else:
+            raise Exception(f"Not Implemented Loss: \
+                {str(self.criterion.__class__)}")
+        return dict(graph_loss=loss)
+
     def forward(self, gfeats, qfeats,
-                qlabels=None, glabels=None, *args, **kwargs):
+                qlabels=None, glabels=None,
+                eval_avg_sim=False, *args, **kwargs):
         """ [NxC] input for both features, return similarity matrix.
         """
         # reshape to sequence-like input
         qfeats = qfeats.view(-1, 1, self.feat_dim)
         gfeats = gfeats.view(-1, 1, self.feat_dim)
 
+        # # HACK: detach configuration
+        # qfeats = qfeats.detach()
+        # gfeats = gfeats.detach()
+
         for layer in self.heads:
-            qfeats, gfeats = \
-                layer(qfeats, gfeats), layer(gfeats, qfeats)
+            qouts, gouts = layer(qfeats, gfeats), layer(gfeats, qfeats)
+            qfeats, qself_feats, qcross_feats = qouts
+            gfeats, gself_feats, gcross_feats = gouts
+
+            # l2-normalize
+            qfeats, qself_feats, qcross_feats = \
+                apply_all(normalize, qfeats, qself_feats, qcross_feats)
+            gfeats, gself_feats, gcross_feats = \
+                apply_all(normalize, gfeats, gself_feats, gcross_feats)
 
         # reshape back
-        qfeats = qfeats.view(-1, self.feat_dim)
-        gfeats = gfeats.view(-1, self.feat_dim)
+        qfeats, qself_feats, qcross_feats = \
+            apply_all(reshape_back, qfeats, qself_feats, qcross_feats)
+        gfeats, gself_feats, gcross_feats = \
+            apply_all(reshape_back, gfeats, gself_feats, gcross_feats)
 
-        qfeats = qfeats / qfeats.norm(dim=1, keepdim=True)
-        gfeats = gfeats / gfeats.norm(dim=1, keepdim=True)
-        sim_mat = torch.matmul(gfeats, qfeats.T)
-        # sim_mat = sim_mat / (self.feat_dim ** 0.5)
+        if eval_avg_sim:
+            sim_mat = torch.stack([
+                torch.matmul(gfeats, qfeats.T),
+                torch.matmul(gself_feats, qself_feats.T),
+                torch.matmul(gcross_feats, qcross_feats.T)
+            ], dim=0).mean(dim=0)
+        else:
+            sim_mat = torch.matmul(gfeats, qfeats.T)
 
         if self.training:
             assert qlabels is not None
             assert glabels is not None
 
-            # use oim loss to supervise
-            graph_feats = torch.cat([qfeats, gfeats])
-            graph_labels = [qlabels, glabels]
-            oim_loss = self.loss(graph_feats, graph_labels)
-            return sim_mat, dict(oim_loss=oim_loss)
+            graph_loss = self.compute_loss(
+                sim_mat, qfeats, gfeats, qlabels, glabels)
+            return sim_mat, graph_loss
         return sim_mat
 
     def inference_features(self, gfeats, qfeats):
@@ -254,16 +406,56 @@ class DecoderGraph(nn.Module):
         gfeats = gfeats.view(-1, 1, self.feat_dim)
 
         for layer in self.heads:
-            qfeats, gfeats = \
-                layer(qfeats, gfeats), layer(gfeats, qfeats)
+            qouts, gouts = layer(qfeats, gfeats), layer(gfeats, qfeats)
+            qfeats, qself_feats, qcross_feats = qouts
+            gfeats, gself_feats, gcross_feats = gouts
+
+            # l2-normalize
+            qfeats, qself_feats, qcross_feats = \
+                apply_all(normalize, qfeats, qself_feats, qcross_feats)
+            gfeats, gself_feats, gcross_feats = \
+                apply_all(normalize, gfeats, gself_feats, gcross_feats)
 
         # reshape back
-        qfeats = qfeats.view(-1, self.feat_dim)
-        gfeats = gfeats.view(-1, self.feat_dim)
+        qfeats, qself_feats, qcross_feats = \
+            apply_all(reshape_back, qfeats, qself_feats, qcross_feats)
+        gfeats, gself_feats, gcross_feats = \
+            apply_all(reshape_back, gfeats, gself_feats, gcross_feats)
 
-        qfeats = qfeats / qfeats.norm(dim=1, keepdim=True)
-        gfeats = gfeats / gfeats.norm(dim=1, keepdim=True)
-        return gfeats, qfeats
+        return [qfeats, qself_feats, qcross_feats], \
+            [gfeats, gself_feats, gcross_feats]
+
+
+class AttnGraphLayer(nn.Module):
+    def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.0):
+        super(AttnGraphLayer, self).__init__()
+        self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
+        self.multihead_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
+        # Implementation of Feedforward model
+        self.linear1 = nn.Linear(d_model, dim_feedforward)
+        self.dropout = nn.Dropout(dropout)
+        self.linear2 = nn.Linear(dim_feedforward, d_model)
+
+        self.norm1 = nn.LayerNorm(d_model)
+        self.norm2 = nn.LayerNorm(d_model)
+        self.norm3 = nn.LayerNorm(d_model)
+        self.dropout1 = nn.Dropout(dropout)
+        self.dropout2 = nn.Dropout(dropout)
+        self.dropout3 = nn.Dropout(dropout)
+
+        self.activation = F.relu
+
+    def forward(self, tgt, memory):
+        self_feat = self.self_attn(tgt, tgt, tgt)[0]
+        tgt = tgt + self.dropout1(self_feat)
+        tgt = self.norm1(tgt)
+        cross_feat = self.multihead_attn(tgt, memory, memory)[0]
+        tgt = tgt + self.dropout2(cross_feat)
+        tgt = self.norm2(tgt)
+        tgt2 = self.linear2(self.dropout(self.activation(self.linear1(tgt))))
+        tgt = tgt + self.dropout3(tgt2)
+        tgt = self.norm3(tgt)
+        return tgt, self_feat, cross_feat
 
 
 # ------------------------------ Image LUT ---------------------------------

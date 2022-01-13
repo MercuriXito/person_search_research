@@ -64,15 +64,30 @@ _C.model.roi_head.nms_thresh_test = 0.4
 # Maximum number of detected objects
 _C.model.roi_head.detections_per_image_test = 300
 
+# K-Sampling Strategies in training RoI Head.
+_C.model.roi_head.k_sampling = False
+_C.model.roi_head.k = 16
+
 # -------------------------------------------------------- #
 #             Additional Contex Graph Head                 #
 # -------------------------------------------------------- #
 
 _C.model.graph_head = CN()
 _C.model.graph_head.use_graph = False
+_C.model.graph_head.graph_module = ""
 _C.model.graph_head.num_graph_stack = 1
 _C.model.graph_head.nheads = 4
 _C.model.graph_head.dropout = 0.0
+_C.model.graph_head.loss = CN()
+_C.model.graph_head.loss.name = "oim"
+_C.model.graph_head.loss.num_features = 256
+_C.model.graph_head.loss.num_pids = 5532
+_C.model.graph_head.loss.num_cq_size = 5000
+_C.model.graph_head.loss.oim_momentum = 0.5
+_C.model.graph_head.loss.oim_scalar = 30.0
+_C.model.graph_head.loss.margin = 0.25
+_C.model.graph_head.loss.circle_gamma = 64
+
 
 # -------------------------------------------------------- #
 #                         backbone                         #
@@ -83,6 +98,13 @@ _C.model.backbone = CN()
 _C.model.backbone.name = "resnet50"
 _C.model.backbone.norm_layer = "bn"
 _C.model.backbone.pretrained = True
+
+# -------------------------------------------------------- #
+#                reid head for person search               #
+# -------------------------------------------------------- #
+
+_C.model.reid_head = CN()
+_C.model.reid_head.norm_layer = "bn"
 
 # -------------------------------------------------------- #
 #                           Loss                           #
@@ -150,8 +172,11 @@ _C.eval.device = "cuda"
 _C.eval.dataset_file = "cuhk-sysu"
 _C.eval.dataset_path = "data/cuhk-sysu"
 _C.eval.eval_context = False
+_C.eval.eval_all_sim = False
 _C.eval.eval_method = "sim"  # proposed for future application.
 _C.eval.checkpoint = "checkpoint.pth"
+_C.eval.use_fast_graph = False
+_C.eval.fast_graph_topk = 50
 
 # -------------------------------------------------------- #
 #                           Miscs                          #

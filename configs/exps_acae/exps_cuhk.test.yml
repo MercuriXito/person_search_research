@@ -1,0 +1,13 @@
+# experiments:
+# - CUHK-SYSU; 
+# - w/ ACAE
+# - lossw_101; 
+
+train:
+  output_dir: exps/exps_acae/exps_cuhk.test
+  batch_size: 2
+  loss_weights:
+    loss_graph: 0.1
+  resume: exps/exps_cuhk.graph/checkpoint0019.pth
+  epochs: 21
+

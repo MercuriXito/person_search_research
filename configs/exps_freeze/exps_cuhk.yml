@@ -1,0 +1,15 @@
+# freeze train baseline
+#
+
+train:
+  output_dir: exps/exps_freeze/exps_cuhk
+  batch_size: 2
+  resume: exps/baseline/baseline.pth
+  loss_weights:
+    loss_graph: 1.0
+model:
+  backbone:
+    norm_layer: "frozen_bn"
+  reid_head:
+    norm_layer: "frozen_bn"
+

@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as F
+import random
 
 from torchvision.models.detection.generalized_rcnn import GeneralizedRCNN
 from torchvision.models.detection.transform import GeneralizedRCNNTransform
@@ -18,7 +19,7 @@ class BaseNet(GeneralizedRCNN):
     def __init__(self, backbone, rpn, roi_head, transform):
         super(BaseNet, self).__init__(backbone, rpn, roi_head, transform)
 
-    def forward(self, images, targets):
+    def forward(self, images, targets=None):
         """
         args:
             - image: List[Tensor]
@@ -115,7 +116,6 @@ class BaseNet(GeneralizedRCNN):
         detections, _ = self.roi_heads(
             features_dict, proposals, images.image_sizes, targets)
 
-
         detections = self.transform.postprocess(
             detections, images.image_sizes, original_image_sizes)
         return detections
@@ -172,6 +172,9 @@ class PSRoIHead(RoIHeads):
             oim_loss,
             reid_feature_dim=256,
             graph_head=None,
+            # additional parameters
+            k_sampling=False,
+            k=16,
             # other Faster-RCNN parameters
             *args, **kwargs):
         super(PSRoIHead, self).__init__(
@@ -181,6 +184,8 @@ class PSRoIHead(RoIHeads):
         self.reid_feature_dim = reid_feature_dim
         self.reid_embed_head = reid_embed_head
         self.graph_head = graph_head
+        self.use_k_sampling = k_sampling
+        self.k = k
 
     def forward(self,
                 features,      # type: Dict[str, Tensor]
@@ -215,12 +220,27 @@ class PSRoIHead(RoIHeads):
             assert labels is not None and regression_targets is not None
             loss_classifier, loss_box_reg = fastrcnn_loss(
                 class_logits, box_regression, labels, regression_targets)
-            loss_oim = self.oim_loss(embeddings, pid_labels)
+            num_persons_per_images = [len(proposal) for proposal in proposals]
+            num_images = len(num_persons_per_images)
+
+            if self.use_k_sampling:
+                # sampling for better training oim loss
+                pid_sampled_inds = self.k_sampling(pid_labels)
+                embedding_list = embeddings.split(num_persons_per_images, 0)
+                train_embedding = []
+                train_pid_labels = []
+                for idx in range(num_images):
+                    train_embedding.append(embedding_list[idx][pid_sampled_inds[idx]])
+                    train_pid_labels.append(pid_labels[idx][pid_sampled_inds[idx]])
+                train_embeddings = torch.cat(train_embedding)
+                loss_oim = self.oim_loss(train_embeddings, train_pid_labels)
+            else:
+                loss_oim = self.oim_loss(embeddings, pid_labels)
+
             boxes = self.box_coder.decode(box_regression, proposals)
             pred_scores = F.softmax(class_logits, -1)
 
             # postprocess training outputs
-            num_persons_per_images = [len(proposal) for proposal in proposals]
             embedding_list = embeddings.split(num_persons_per_images, 0)
             box_list = boxes.split(num_persons_per_images, 0)
             norm_list = norms.split(num_persons_per_images, 0)
@@ -230,7 +250,6 @@ class PSRoIHead(RoIHeads):
                 "loss_box_reg": loss_box_reg,
                 "loss_oim": loss_oim,
             }
-            num_images = len(num_persons_per_images)
             for idx in range(num_images):
                 result.append({
                     "pid_labels": pid_labels[idx],
@@ -292,6 +311,19 @@ class PSRoIHead(RoIHeads):
 
         regression_targets = self.box_coder.encode(matched_gt_boxes, proposals)
         return proposals, matched_idxs, labels, regression_targets, pid_labels
+
+    def k_sampling(self, labels):
+        sample_inds = []
+        for img_in_labels in labels:
+            ulabels = torch.unique(img_in_labels)
+            sample_in_imgs = []
+            for label in ulabels:
+                inds = torch.where(img_in_labels == label)[0].tolist()
+                sinds = random.choices(inds, k=self.k)
+                sample_in_imgs.extend(sinds)
+            sample_in_imgs = torch.tensor(sample_in_imgs).to(ulabels)
+            sample_inds.append(sample_in_imgs)
+        return sample_inds
 
     def assign_targets_to_proposals(self, proposals, gt_boxes, gt_labels, gt_pid_labels):
         matched_idxs = []
@@ -443,6 +475,8 @@ def build_faster_rcnn_based_models(args):
     box_score_thresh = args.model.roi_head.score_thresh_test
     box_nms_thresh = args.model.roi_head.nms_thresh_test
     box_detections_per_img = args.model.roi_head.detections_per_image_test
+    roi_use_ksampling = args.model.roi_head.k_sampling
+    roi_use_k = args.model.roi_head.k
 
     # model parameters
     use_multi_scale = args.model.use_multi_scale
@@ -492,15 +526,18 @@ def build_faster_rcnn_based_models(args):
     oim_loss = OIMLoss(num_features, num_pids, num_cq_size, oim_momentum, oim_scalar)
 
     # build reid head
+    reid_head_norm_layer = args.model.reid_head.norm_layer
     if use_multi_scale:
         reid_head = ReIDEmbeddingHead(
             featmap_names=["feat_res4", "feat_res5"],
             in_channels=[1024, 2048],
-            dim=reid_feature_dim, feature_norm=True)
+            dim=reid_feature_dim, feature_norm=True,
+            norm_layer=reid_head_norm_layer)
     else:
         reid_head = ReIDEmbeddingHead(
             featmap_names=['feat_res5'], in_channels=[2048],
-            dim=reid_feature_dim, feature_norm=True)
+            dim=reid_feature_dim, feature_norm=True,
+            norm_layer=reid_head_norm_layer)
 
     # # build context attention head.
     # use_graph = args.model.roi_head.graph_head.use_graph
@@ -523,6 +560,9 @@ def build_faster_rcnn_based_models(args):
         batch_size_per_image=box_batch_size_per_image,
         positive_fraction=box_positive_fraction,
         bbox_reg_weights=bbox_reg_weights,
+        # Sampling parameters,
+        k_sampling=roi_use_ksampling,
+        k=roi_use_k,
         # RoIHead inference parameters
         score_thresh=box_score_thresh,
         nms_thresh=box_nms_thresh,

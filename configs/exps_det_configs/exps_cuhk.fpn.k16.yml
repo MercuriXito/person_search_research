@@ -1,0 +1,12 @@
+# K-Sampling Strategy: k=16
+#
+
+model:
+  roi_head:
+      k_sampling: true
+      k: 16
+train:
+  output_dir: exps/exps_det/exps_cuhk.fpn.k16
+  batch_size: 2
+  epochs: 20
+
