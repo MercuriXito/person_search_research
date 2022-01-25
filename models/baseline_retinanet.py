@@ -16,48 +16,17 @@ import torchvision.ops.boxes as box_ops
 from torchvision.models.detection import _utils as det_utils
 from torchvision.models.detection.rpn import AnchorGenerator
 from torchvision.models.detection.transform import GeneralizedRCNNTransform
+from torchvision.ops.poolers import MultiScaleRoIAlign
 from models.losses import OIMLoss
-from models.new_backbone import build_fpn_backbone
+from models.backbone import build_fpn_backbone, \
+    build_faster_rcnn_based_multi_scale_backbone
 from models.reid_head import ReIDEmbeddingHead
-
-
-class BoxHead(nn.Module):
-    def __init__(self, in_channels, out_channels, num_layers=4):
-        super(BoxHead, self).__init__()
-        self.in_channels = in_channels
-        self.out_channels = out_channels
-        self.num_layers = num_layers
-        convs = []
-        for i in range(4):
-            convs.append(nn.Conv2d(in_channels, in_channels, 3, 1, 1))
-            convs.append(nn.BatchNorm2d(in_channels))
-            convs.append(nn.ReLU())
-        self.convs = nn.Sequential(*convs)
-        self.output = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, 3, 1, 1),
-            nn.AdaptiveAvgPool2d(1)
-        )
-        self._init_weights()
-
-    def _init_weights(self):
-        for layer in self.convs.children():
-            if isinstance(layer, nn.Conv2d):
-                torch.nn.init.normal_(layer.weight, std=0.01)
-                torch.nn.init.constant_(layer.bias, 0)
-        for layer in self.output.children():
-            if isinstance(layer, nn.Conv2d):
-                torch.nn.init.normal_(layer.weight, std=0.01)
-                torch.nn.init.constant_(layer.bias, 0)
-
-    def forward(self, box_features):
-        x = self.convs(box_features)
-        feats = self.output(x)
-        return {"feat_res5": feats}
 
 
 class PSRoIHead(nn.Module):
     def __init__(
-            self, mode,
+            self,
+            box_roi_pool,
             box_head,
             reid_embed_head,
             oim_loss,
@@ -68,34 +37,31 @@ class PSRoIHead(nn.Module):
               "sampling": use gt boxes and sampled generated boxes.
         """
         super().__init__()
-        self.mode = mode
         self.box_head = box_head
         self.reid_embed_head = reid_embed_head
         self.oim_loss = oim_loss
         self.use_k_sampling = use_k_sampling
         self.k = k
-        self.mbox_head = ops.MultiScaleRoIAlign(
-            featmap_names=["feat_res3", "feat_res4", "feat_res5", "p6", "p7"],
-            output_size=14, sampling_ratio=2
-        )
+        self.box_roi_pool = box_roi_pool
 
     def forward(self,
                 features: dict,
                 proposals: list,
                 image_shapes,
                 targets=None,
-                matched_idxs=None):
+                matched_idxs=None,
+                *args, **kwargs):
 
         if self.training:
             assert matched_idxs is not None
             features_shape = [list(feats.shape) for feats in features.values()]
             # feats_level_inds is required if using level_roi_pooling.
             proposals, labels, pid_labels, feats_level_inds = \
-                self.select_training_samples_test(proposals, targets, features_shape, matched_idxs)
+                self.select_gt_training_samples(proposals, targets, features_shape, matched_idxs)
 
         num_imgs = len(proposals)
         # roi_features = self.level_roi_pooling(features, proposals, feats_level_inds)
-        roi_features = self.mbox_head(features, proposals, image_shapes)
+        roi_features = self.box_roi_pool(features, proposals, image_shapes)
         roi_features = self.box_head(roi_features)
         embeddings, norms = self.reid_embed_head(roi_features)
 
@@ -142,7 +108,7 @@ class PSRoIHead(nn.Module):
             roi_feats = torchvision.ops.roi_align(
                 feature, boxes_per_level,
                 output_size=14,
-                spatial_scale=2**(feat_idx+3),  # HACK: start from C2 feature
+                spatial_scale=float(1/(2**(feat_idx+3))),  # HACK: start from C2 feature
                 sampling_ratio=2,
             )
 
@@ -174,15 +140,13 @@ class PSRoIHead(nn.Module):
             sample_inds.append(sample_in_imgs)
         return sample_inds
 
-    def select_train_samples_gt(
+    def select_gt_training_samples(
             self, proposals, targets, features_shape, matched_idxs):
         """ Only sample ground-truth boxes, suggested in DMR-Net.
         """
-        boxes, labels, pid_labels = [], [], []
-
-        boxes = self.add_gt_proposals(boxes, targets)
-        labels = self.add_gt_labels(labels, targets)
-        pid_labels = self.add_gt_pid_labels(pid_labels, targets)
+        boxes = [target["boxes"] for target in targets]
+        labels = [target["labels"]for target in targets]
+        pid_labels = [target["pid_labels"] for target in targets]
         feats_level = []
         return boxes, labels, pid_labels, feats_level
 
@@ -735,8 +699,7 @@ class RetinaNet(nn.Module):
 
                 # remove low scoring boxes
                 scores_per_level = torch.sigmoid(logits_per_level).flatten()
-                # keep_idxs = scores_per_level > self.score_thresh
-                keep_idxs = scores_per_level > 0.3
+                keep_idxs = scores_per_level > self.score_thresh
                 scores_per_level = scores_per_level[keep_idxs]
                 topk_idxs = torch.where(keep_idxs)[0]
 
@@ -840,7 +803,7 @@ class RetinaNet(nn.Module):
         # create the set of anchors
         anchors = self.anchor_generator(images, features_list)
 
-        assert isinstance(self.ps_roi_head, PSRoIHead)
+        # assert isinstance(self.ps_roi_head, PSRoIHead)
 
         losses = {}
         detections: List[Dict[str, Tensor]] = []
@@ -855,7 +818,7 @@ class RetinaNet(nn.Module):
             proposals = proposals.view(len(anchors), -1, 4).unbind(dim=0)
             ps_outs, ps_loss = self.ps_roi_head.forward(
                 features, proposals, images.image_sizes,
-                targets, matched_idxs=matched_idxs)
+                targets, matched_idxs=matched_idxs, images=images)
             losses.update(detection_losses)
             losses.update(ps_loss)
         else:
@@ -897,7 +860,7 @@ class RetinaNet(nn.Module):
         features_dict = self.backbone(images.tensors)
 
         proposals = [target["boxes"] for target in targets]
-        assert isinstance(self.ps_roi_head, PSRoIHead)
+        # assert isinstance(self.ps_roi_head, PSRoIHead)
         roi_res, _ = self.ps_roi_head.forward(
             features_dict, proposals, images.image_sizes)
 
@@ -918,7 +881,7 @@ class RetinaNet(nn.Module):
         return detections
 
 
-def build_retina_net(args):
+def build_retinanet_based_models(args):
 
     # build backbone
     backbone = build_fpn_backbone(
@@ -945,15 +908,25 @@ def build_retina_net(args):
     head = RetinaNetHead(256, 3, num_classes)
 
     # model parameters
-    # TODO: enable `use_multi_scale`
     use_multi_scale = args.model.use_multi_scale
     reid_feature_dim = args.model.reid_feature_dim
     # build person search head
-    box_head = BoxHead(256, 2048)
+    _, box_head = build_faster_rcnn_based_multi_scale_backbone(
+            args.model.backbone.name,
+            args.model.backbone.pretrained,
+            args.model.backbone.norm_layer,
+            return_res4=use_multi_scale)
     # build reid head
-    reid_head = ReIDEmbeddingHead(
-        featmap_names=['feat_res5'], in_channels=[2048],
-        dim=reid_feature_dim, feature_norm=True)
+    representation_size = 1024
+    if use_multi_scale:
+        reid_head = ReIDEmbeddingHead(
+            featmap_names=["feat_res4", "feat_res5"],
+            in_channels=[256, representation_size],
+            dim=reid_feature_dim, feature_norm=True)
+    else:
+        reid_head = ReIDEmbeddingHead(
+            featmap_names=['feat_res5'], in_channels=[256],
+            dim=reid_feature_dim, feature_norm=True)
     # build oim loss
     num_features = reid_feature_dim
     num_pids = args.loss.oim.num_pids
@@ -961,7 +934,14 @@ def build_retina_net(args):
     oim_momentum = args.loss.oim.oim_momentum
     oim_scalar = args.loss.oim.oim_scalar
     oim_loss = OIMLoss(num_features, num_pids, num_cq_size, oim_momentum, oim_scalar)
-    ps_roi_head = PSRoIHead("sampling", box_head, reid_head, oim_loss)
+
+    box_roi_pool = MultiScaleRoIAlign(
+        featmap_names=['feat_res3', 'feat_res4', 'feat_res5'],
+        output_size=7,
+        sampling_ratio=2)
+
+    ps_roi_head = PSRoIHead(
+            box_roi_pool, box_head, reid_head, oim_loss)
 
     network = RetinaNet(
         backbone, num_classes,
@@ -981,59 +961,45 @@ def build_retina_net(args):
     return network
 
 
-if __name__ == '__main__':
+def search_image_indices_by_pid(dataset, pid_label):
+    indices = []
+    for idx in range(len(dataset)):
+        plabels = dataset.record[idx]["gt_pids"]
+        if pid_label in list(plabels):
+            indices.append(idx)
+    return indices
 
-    from datasets.cuhk_sysu import CUHK_SYSU
-    import torchvision.transforms as T
-    from datasets.transforms import ToTensor
+
+if __name__ == '__main__':
     from configs.faster_rcnn_default_configs import get_default_cfg
-    from easydict import EasyDict
     from utils.misc import ship_to_cuda
     from datasets import build_trainset
-    from torch.utils.data import DataLoader
-    from torch.utils.data.sampler import RandomSampler, BatchSampler
 
     args = get_default_cfg()
-
-    root = "data/cuhk-sysu"
-    transforms = ToTensor()
-
-    # dataset = CUHK_SYSU(root, transforms, "train")
-    dataset = build_trainset("cuhk-sysu", root)
-
-    sampler = RandomSampler(dataset)
-    batch_sampler = BatchSampler(sampler, batch_size=4, drop_last=True)
-    dataloader = DataLoader(dataset, batch_sampler=batch_sampler, num_workers=4, collate_fn=lambda x: x)
-
-    image1, target1 = dataset[0]
-    image2, target2 = dataset[1]
-
-    # image_mean = [0.485, 0.456, 0.406]
-    # image_std = [0.229, 0.224, 0.225]
-    # min_size = 1500
-    # max_size = 900
-    # transform = GeneralizedRCNNTransform(min_size, max_size, image_mean, image_std)
-
-    # images, targets = transform.forward([image1, image2], [target1, target2])
 
     device = "cuda"
     # device = "cpu"
     device = torch.device(device)
-    images = [image1, image2]
-    targets = [target1, target2]
+
+    root = "data/cuhk-sysu"
+    dataset = build_trainset("cuhk-sysu", root, use_transform=False)
+
+    indices = search_image_indices_by_pid(dataset, 1101)
+    images, targets = [], []
+
+    for idx in indices[:2]:
+        item = dataset[idx]
+        images.append(item[0])
+        targets.append(item[1])
     images, targets = ship_to_cuda(images, targets, device)
 
-    # draw boxes
-    # from utils.vis import draw_boxes_text
-    # for i in range(len(images.tensors)):
-    #     img = images.tensors[i]
-    #     boxes = targets[i]["boxes"]
-    #     draw_boxes_text(img, boxes)
-
-    model = build_retina_net(args)
-    model.load_state_dict(
+    # model
+    model = build_retinanet_based_models(args)
+    mkeys, ukeys = model.load_state_dict(
         torch.load(
-            "exps/exps_det/exps_retinanet.det/checkpoint.pth",
+            # "exps/exps_det/exps_retinanet.det/checkpoint.pth",
+            # "exps/exps_det/exps_cuhk.retinanet/checkpoint0019.pth",
+            "exps/exps_det/exps_cuhk.retinanet.fpn_reid_head.sample/checkpoint0020.pth",
             map_location="cpu"
         )["model"],
         strict=False
@@ -1041,25 +1007,25 @@ if __name__ == '__main__':
 
     model.to(device)
     model.eval()
-    model.train()
+    # model.train()
 
     with torch.no_grad():
-        outputs = model(images, targets)
+        outputs, _ = model(images, targets)
 
     from IPython import embed
     embed()
 
-    # import cv2
-    # from utils.vis import draw_boxes_text
+    if False:
+        import os
+        import cv2
+        from utils.vis import draw_boxes_text
 
-    # det_thresh = 0.5
+        dirname = os.path.join("exps", "vis", "retinanet")
+        os.makedirs(dirname, exist_ok=True)
 
-    # for image, target, outs in zip(images, targets, outputs[0]):
-    #     boxes = outs["boxes"]
-    #     scores = outs["scores"]
+        for image, target, outs in zip(images, targets, outputs):
+            boxes = outs["boxes"]
+            scores = outs["scores"]
 
-    #     keep = scores > det_thresh
-    #     boxes = boxes[keep]
-
-    #     dimg = draw_boxes_text(image, boxes)
-    #     print(cv2.imwrite(f"exps/test/{target['im_name']}", dimg))
+            dimg = draw_boxes_text(image, boxes)
+            print(cv2.imwrite(os.path.join(dirname, f"det_{target['im_name']}"), dimg))
