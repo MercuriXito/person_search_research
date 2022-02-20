@@ -10,7 +10,7 @@ from evaluation.eval import FasterRCNNExtractor, evaluate, \
 from evaluation.evaluator import PersonSearchEvaluator
 
 
-def build_and_load_from_dir(exp_dir, dst_eval_file=""):
+def build_and_load_from_dir(exp_dir, dst_eval_file="", other_options=None):
     """ load fasterrcnn based model configs from saved folder:
         - resume option from config.yml
         - build model, resume from checkpoint
@@ -31,6 +31,7 @@ def build_and_load_from_dir(exp_dir, dst_eval_file=""):
 
     t_args = get_default_cfg()
     t_args.merge_from_file(config_file)
+    t_args.merge_from_list(other_options)
     t_args.freeze()
     eval_args = t_args.eval
     print(eval_args)

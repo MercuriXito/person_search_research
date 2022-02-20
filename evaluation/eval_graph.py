@@ -17,9 +17,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("exp_dir")
     parser.add_argument("--eval-config", default="", type=str)
+    parser.add_argument("opts", default=None, nargs=argparse.REMAINDER)
     args = parser.parse_args()
 
-    model, t_args = build_and_load_from_dir(args.exp_dir, args.eval_config)
+    model, t_args = build_and_load_from_dir(args.exp_dir, args.eval_config, args.opts)
     eval_args = t_args.eval
     checkpoint_path = os.path.join(args.exp_dir, eval_args.checkpoint)
 
