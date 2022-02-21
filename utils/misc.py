@@ -156,22 +156,50 @@ def ship_to_cuda(images, targets=None, device=None):
         return images
 
 
-def compare(outs_a, outs_b):
-    assert type(outs_a) == type(outs_b)
-    res = True
-    if isinstance(outs_a, dict):
-        assert set(outs_a.keys()) == set(outs_b.keys())
-        for k in outs_a.keys():
-            va, vb = outs_a[k], outs_b[k]
-            res = res and compare(va, vb)
-    elif isinstance(outs_a, (list, tuple)):
-        assert len(outs_a) == len(outs_b)
-        for i in range(len(outs_a)):
-            res = res and compare(outs_a[i], outs_b[i])
-    elif isinstance(outs_a, torch.Tensor):
-        res = res and (torch.sum(outs_a - outs_b != 0) == 0).item()
-    elif isinstance(outs_a, np.ndarray):
-        res = res and (np.sum(outs_a - outs_b != 0) == 0).item()
-    else:
-        raise NotImplementedError(f"{type(outs_a)}")
+class CompareError(Exception):
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args)
+
+
+class CompareTypeError(CompareError):
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args)
+
+
+class CompareResError(CompareError):
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args)
+
+
+def compare(outs_a, outs_b, prefix=None):
+    if prefix is None:
+        prefix = []
+    assert isinstance(prefix, list)
+    try:
+        if type(outs_a) != type(outs_b):
+            raise CompareTypeError(f"{type(outs_a)} != {type(outs_b)}")
+        res = True
+        if isinstance(outs_a, dict):
+            assert set(outs_a.keys()) == set(outs_b.keys())
+            for k in outs_a.keys():
+                va, vb = outs_a[k], outs_b[k]
+                res = res and compare(va, vb, prefix=prefix+[f"{k}"])
+        elif isinstance(outs_a, (list, tuple)):
+            assert len(outs_a) == len(outs_b)
+            for i in range(len(outs_a)):
+                res = res and compare(outs_a[i], outs_b[i], prefix=prefix+[f"{i}"])
+        elif isinstance(outs_a, torch.Tensor):
+            res = res and (torch.sum(outs_a - outs_b != 0) == 0).item()
+        elif isinstance(outs_a, np.ndarray):
+            res = res and (np.sum(outs_a - outs_b != 0) == 0).item()
+        elif isinstance(outs_a, (str, int, float)):
+            res = res and (outs_a == outs_b)
+        else:
+            raise NotImplementedError(f"{type(outs_a)}")
+        if not res:
+            raise CompareResError()
+    except Exception as ex:
+        print("Exception occur in :{}".format(".".join(prefix)))
+        raise(ex)
     return res
+

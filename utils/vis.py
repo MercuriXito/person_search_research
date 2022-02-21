@@ -76,7 +76,7 @@ def draw_boxes(image, boxes, save_path):
 
 def draw_boxes_text(
         image, boxes, str_texts=None, name="",
-        write_output=False):
+        write_output=False, normalize=False):
 
     if isinstance(image, torch.Tensor):
         assert image.ndim == 3
@@ -86,9 +86,10 @@ def draw_boxes_text(
         cimage = image
     cimage = cimage.copy()
     if cimage.dtype != np.uint8:
-        image_mean = np.asarray([0.485, 0.456, 0.406]).reshape(1, 1, -1)
-        image_std = np.asarray([0.229, 0.224, 0.225]).reshape(1, 1, -1)
-        cimage = cimage * image_std + image_mean
+        if normalize:
+            image_mean = np.asarray([0.485, 0.456, 0.406]).reshape(1, 1, -1)
+            image_std = np.asarray([0.229, 0.224, 0.225]).reshape(1, 1, -1)
+            cimage = cimage * image_std + image_mean
         cimage = np.clip(cimage, 0, 1) * 255.0
         cimage = cimage.astype(np.uint8)
         # RGB2BGR

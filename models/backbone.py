@@ -10,6 +10,7 @@ from torchvision.models.detection.backbone_utils import FeaturePyramidNetwork, \
     BackboneWithFPN
 from torchvision.models.detection.faster_rcnn import TwoMLPHead
 from torchvision.models.resnet import __all__
+from torchvision.ops.feature_pyramid_network import LastLevelP6P7
 
 
 class FrozenBatchNorm1d(nn.Module):
@@ -184,11 +185,11 @@ class MSBoxHead(nn.Module):
 
         self.conv = nn.Sequential(
             nn.Conv2d(in_channels, representation_size, 3, 1, 1),
-            nn.ReLU(True),
             nn.BatchNorm2d(representation_size),
+            nn.ReLU(True),
             nn.Conv2d(representation_size, representation_size, 3, 1, 1),
-            nn.ReLU(True),
             nn.BatchNorm2d(representation_size),
+            nn.ReLU(True),
             nn.Conv2d(representation_size, self.out_channels[-1], 3, 1, 1)
         )
 
@@ -225,7 +226,11 @@ class MSTwoMLPHead(nn.Module):
         feat = F.relu(self.fc7(feat))
 
         if self.GAP:
-            x = F.adaptive_max_pool2d(x, 1).flatten(start_dim=1)
+            # TODO: change AdaMaxPool2d to AdaAvgPool2d.
+            if x.numel() == 0:
+                x = F.adaptive_avg_pool2d(x, 1).flatten(start_dim=1)
+            else:
+                x = F.adaptive_max_pool2d(x, 1).flatten(start_dim=1)
         if self.return_res4:
             return OrderedDict([
                 ['feat_res4', x],  # Global average pooling
@@ -301,3 +306,37 @@ def build_faster_rcnn_based_multi_scale_backbone(
         return_res4, GAP
     )
     return stem, head
+
+
+def build_fpn_backbone(
+        backbone_name, pretrained, norm_layer="bn"):
+
+    assert backbone_name in __all__, f"{backbone_name} not found."
+    norm_layer = get_norm_layer(norm_layer)
+    backbone = getattr(torchvision.models, backbone_name)(
+        pretrained=pretrained,
+        norm_layer=norm_layer
+    )
+
+    # freeze layers
+    backbone.conv1.weight.requires_grad_(False)
+    backbone.bn1.weight.requires_grad_(False)
+    backbone.bn1.bias.requires_grad_(False)
+
+    body = IntermediateLayerGetter(
+        backbone,
+        return_layers=dict(
+            layer2="feat_res3",
+            layer3="feat_res4",
+            layer4="feat_res5"
+        ))
+
+    fpn = FeaturePyramidNetwork(
+        in_channels_list=[512, 1024, 2048],
+        out_channels=256,
+        extra_blocks=LastLevelP6P7(256, 256)
+    )
+
+    modules = nn.Sequential(body, fpn)
+    setattr(modules, "out_channels", 256)
+    return modules
