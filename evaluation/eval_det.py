@@ -2,11 +2,9 @@ import os
 import PIL.Image as Image
 from prettytable import PrettyTable
 from tqdm import tqdm
-
 import torch
-from torchvision.models.detection.faster_rcnn import fasterrcnn_resnet50_fpn
-from models.baseline_fpn import build_faster_rcnn_based_models
 
+from models import build_models
 from configs.faster_rcnn_default_configs import get_default_cfg
 from utils.misc import ship_to_cuda
 from datasets import load_eval_datasets
@@ -78,8 +76,7 @@ def main():
         num_classes=2,
     )
     # HACK configuration.
-    # model = fasterrcnn_resnet50_fpn(**model_args)
-    model = build_faster_rcnn_based_models(t_args)
+    model = build_models(t_args)
     model.eval()
     model.load_state_dict(
         torch.load(

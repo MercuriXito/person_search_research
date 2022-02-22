@@ -1,9 +1,8 @@
 import torch
 import os
-from models.graph_net import build_graph_net
 
 from utils.misc import pickle
-from models.baseline import build_faster_rcnn_based_models
+from models import build_graph_models, build_models
 from configs.faster_rcnn_default_configs import get_default_cfg
 from evaluation.eval import FasterRCNNExtractor, evaluate, \
     GTFeatureExtractor
@@ -16,6 +15,9 @@ def build_and_load_from_dir(exp_dir, dst_eval_file="", other_options=None):
         - build model, resume from checkpoint
         - resume evaluation options
     """
+    if other_options is None:
+        other_options = []
+
     # target eval config file?
     if len(dst_eval_file) > 0:
         eval_file = dst_eval_file
@@ -38,9 +40,9 @@ def build_and_load_from_dir(exp_dir, dst_eval_file="", other_options=None):
 
     # load model
     if t_args.model.graph_head.use_graph:
-        model = build_graph_net(t_args)
+        model = build_graph_models(t_args)
     else:
-        model = build_faster_rcnn_based_models(t_args)
+        model = build_models(t_args)
 
     # HACK: checkpoint
     checkpoint_path = os.path.join(exp_dir, eval_args.checkpoint)

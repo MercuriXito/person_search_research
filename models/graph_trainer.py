@@ -14,7 +14,7 @@ from torch.utils.data.dataloader import DataLoader
 from torch.utils.data.sampler import RandomSampler, BatchSampler
 
 from models.ctx_attn_head import ImageFeaturesLut
-from models.graph_net import build_graph_net
+from models import build_graph_models
 from datasets import build_trainset
 import utils.misc as utils
 from utils.logger import MetricLogger
@@ -96,7 +96,7 @@ def main(args):
     feats_lut = ImageFeaturesLut(dataset)
 
     # build model
-    model = build_graph_net(args)
+    model = build_graph_models(args)
     model.to(device)
 
     # build optimizer

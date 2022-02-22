@@ -18,12 +18,14 @@ _C = CN()
 # _C.input.num_workers_train = 5
 # _C.input.num_workers_test = 1
 
+_C.model = CN()
+_C.model.name = "fasterrcnn"
+_C.model.use_multi_scale = True
+_C.model.reid_feature_dim = 256
+
 # -------------------------------------------------------- #
 #                            RPN                           #
 # -------------------------------------------------------- #
-_C.model = CN()
-_C.model.use_multi_scale = True
-_C.model.reid_feature_dim = 256
 
 _C.model.rpn = CN()
 # NMS threshold used on RoIs
