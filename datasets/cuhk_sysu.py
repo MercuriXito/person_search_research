@@ -5,6 +5,7 @@ import numpy as np
 import torch
 from scipy.io import loadmat
 from sklearn.metrics import average_precision_score
+from collections import defaultdict
 from numba import jit
 
 from .ps_dataset import PersonSearchDataset
@@ -179,6 +180,37 @@ class CUHK_SYSU(PersonSearchDataset):
                            'gt_pids': np.array([-100]),
                            'flipped': False})
         return probes
+
+    def load_test_context_annotations(self):
+        anno_path = osp.join(self.root, "annotation", "Person.mat")
+        mat = loadmat(anno_path)
+        mat = mat['Person'].squeeze()
+
+        test_imgs = osp.join(self.root, "annotation", "pool.mat")
+        test_imgs = loadmat(test_imgs)
+        test_imgs = test_imgs['pool'].squeeze()
+        test_imgs = [x[0] for x in test_imgs]
+        test_imgs = set(test_imgs)
+
+        targets = defaultdict(list)
+        for item in mat:
+            pid, n, locations = item
+            locations = locations.squeeze()
+            find_test_imgs = []
+            for loc in locations:
+                img_name, box_loc, ishard = loc
+                img_name = img_name[0]
+                real_box = box_loc.copy().astype(np.int)
+                real_box[0][2] += real_box[0][0]
+                real_box[0][3] += real_box[0][1]
+                if img_name in test_imgs:
+                    find_test_imgs.append([
+                        img_name, pid[0], real_box
+                    ])
+
+            for fimg, pid, box_loc in find_test_imgs:
+                targets[fimg].append([pid, box_loc])
+        return targets
 
     @staticmethod
     @jit(forceobj=True)

@@ -4,8 +4,6 @@ from prettytable import PrettyTable
 from tqdm import tqdm
 import torch
 
-from models import build_models
-from configs.faster_rcnn_default_configs import get_default_cfg
 from utils.misc import ship_to_cuda
 from datasets import load_eval_datasets
 from evaluation.eval import Person_Search_Features_Extractor
@@ -65,18 +63,15 @@ def evaluate_detection(extractor, args, imdb=None):
 def main():
     # only used for evaluation fpn-detection model.
     import argparse
+    from evaluation.eval_defaults import build_and_load_from_dir
 
     parser = argparse.ArgumentParser()
     parser.add_argument("exp_dir")
     args = parser.parse_args()
 
-    t_args = get_default_cfg()
-    model_args = dict(
-        pretrained=False,
-        num_classes=2,
-    )
     # HACK configuration.
-    model = build_models(t_args)
+    model, t_args = build_and_load_from_dir(args.exp_dir)
+
     model.eval()
     model.load_state_dict(
         torch.load(
