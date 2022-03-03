@@ -3,7 +3,7 @@
 model:
   name: fcos
 train:
-  output_dir: exps/exps_det/exps_fcos.imprv.det.iou_loss
+  output_dir: exps/exps_det/exps_fcos.imprv.det.giou_loss
   batch_size: 2
   loss_weights:
       loss_oim: 0.0
@@ -11,5 +11,5 @@ train:
       loss_box_reg: 5.0
       loss_objectness: 0.0
       loss_rpn_box_reg: 0.0
-  epochs: 20
-  # resume: exps/exps_det/exps_fcos.imprv.det.iou_loss/checkpoint0010.pth
+  epochs: 1
+
