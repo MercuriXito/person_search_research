@@ -12,6 +12,7 @@ def build_models(args):
         model_name = "fasterrcnn"
     else:
         model_name = args.model.name
+    print(model_name)
     if model_name == "fasterrcnn":
         return build_faster_rcnn_based_models(args)
     elif model_name == "fpn":

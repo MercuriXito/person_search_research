@@ -10,6 +10,8 @@ from torchvision.models.detection._utils import BoxCoder
 import torchvision.ops.boxes as box_ops
 from models.backbone import build_fpn_backbone
 
+INF = torch.iinfo(torch.int).max
+
 
 # ---------------------- supplementary functions -------------------
 def _area(boxes):
@@ -84,7 +86,8 @@ def iou_loss(proposals, target_boxes, eps=1e-6):
 
     iou = inter / (area_a + area_b - inter + eps)
 
-    loss = 1 - iou
+    # loss = 1 - iou
+    loss = -torch.log(iou)
     return loss
 
 
@@ -353,20 +356,10 @@ class FCOSRegressionHead(nn.Module):
                 torch.nn.init.normal_(layer.weight, std=0.01)
                 torch.nn.init.zeros_(layer.bias)
         self.box_coder = FCOSBoxCoder(weights=(1.0, 1.0, 1.0, 1.0))
-        # constrained strides suggested in fcos
-        self.strides = torch.tensor([0, 64, 128, 256, 512, torch.iinfo(torch.int).max], dtype=torch.long)
-        self.constrain = False
 
     def compute_loss(self, targets, head_outputs, points, matched_idxs, image_shapes, feats_shape):
         losses = []
         bbox_regression = head_outputs['bbox_regression']
-
-        if self.constrain:
-            device = points.device
-            points_lvl_labels = torch.cat([
-                torch.full((shape, ), i, dtype=torch.long).to(device)
-                for i, shape in enumerate(feats_shape)
-            ])
 
         for targets_per_image, bbox_regression_per_image, points_per_image, matched_idxs_per_image, image_shape in \
                 zip(targets, bbox_regression, points, matched_idxs, image_shapes):
@@ -382,18 +375,13 @@ class FCOSRegressionHead(nn.Module):
 
             # use iou loss
             proposals = self.box_coder.decode_single(bbox_regression_per_image, points_per_image, image_shape)
-            loss_iou = giou_loss(proposals, matched_gt_boxes_per_image).mean()
+            # loss_iou = giou_loss(proposals, matched_gt_boxes_per_image).mean()
+            loss_iou = iou_loss(proposals, matched_gt_boxes_per_image).mean()
             losses.append(loss_iou)
             continue
 
             # compute the regression targets
             # target_regression = self.box_coder.encode_single(matched_gt_boxes_per_image, points_per_image, image_shape)
-
-            # if self.constrain:
-            #     target_lvl_labels = points_lvl_labels[foreground_idxs_per_image]
-            #     mask = self.constrain_matching(target_regression, target_lvl_labels, image_shape)
-            #     target_regression = target_regression[mask]
-            #     bbox_regression_per_image = bbox_regression_per_image[mask]
 
             # # compute the loss
             # losses.append(torch.nn.functional.l1_loss(
@@ -403,30 +391,6 @@ class FCOSRegressionHead(nn.Module):
             # ) / max(1, num_foreground))
 
         return _sum(losses) / max(1, len(targets))
-
-    def constrain_matching(self, target_regression, target_lvl_labels, image_shape):
-        """ Constrain the matching between ground-truth according to
-        the offset. Return the mask indicating the actual positive
-        samples after filtering.
-        """
-        device = target_lvl_labels.device
-        strides = self.strides.to(device)
-
-        # offset
-        width, height = image_shape
-        scales = torch.tensor([[width, height, width, height]]).to(target_regression)
-        target_regression = target_regression * scales
-        max_offset = target_regression.max(dim=1)[0]
-
-        min_pos_offset = strides[:-1][target_lvl_labels]
-        max_pos_offset = strides[1:][target_lvl_labels]
-
-        pos_mask = torch.logical_and(
-            max_offset >= min_pos_offset,
-            max_offset <= max_pos_offset,
-        )
-        assert torch.sum(pos_mask) > 0
-        return pos_mask
 
     def forward(self, x):
         # type: (List[Tensor]) -> Tensor
@@ -496,6 +460,15 @@ class AnchorFreePS(nn.Module):
         self.nms_thresh = nms_thresh
         self.detections_per_img = detections_per_img
 
+        # limit range of each level
+        self.object_sizes_of_interest = [
+            [-1, 64],
+            [64, 128],
+            [128, 256],
+            [256, 512],
+            [512, INF],
+        ]
+
     def forward(self, images, targets=None, debug=False):
         """
         args:
@@ -534,36 +507,46 @@ class AnchorFreePS(nn.Module):
         return detections, loss
 
     def compute_loss(self, points, head_outputs, targets, image_shapes, feats_shapes):
-        # TODO: constraint the matching of groud-truth boxes for points on
-        # different level of features
         device = points.device
+
+        # HACK: points in each image are of the same size.
+        object_limits = []
+        for object_size, feat_shape in zip(self.object_sizes_of_interest, feats_shapes):
+            object_size = torch.tensor(object_size).view(1, -1).to(device).expand(feat_shape, 2)
+            object_limits.append(object_size)
+        object_limits = torch.cat(object_limits)
 
         all_matched_idxs = []
         # match between points and ground truth boxes
         for target_per_img, points_per_img in zip(targets, points):
             boxes = target_per_img["boxes"].unsqueeze(dim=0)
             points_per_img = points_per_img.unsqueeze(dim=1)
+            assert len(points_per_img) == len(object_limits)
 
             # in boxes, strictly
-            left_cond = points_per_img[..., 0] > boxes[..., 0]
-            right_cond = points_per_img[..., 0] < boxes[..., 2]
-            top_cond = points_per_img[..., 1] > boxes[..., 1]
-            bottom_cond = points_per_img[..., 1] < boxes[..., 3]
+            left = points_per_img[..., 0] - boxes[..., 0]
+            top = points_per_img[..., 1] - boxes[..., 1]
+            right = boxes[..., 2] - points_per_img[..., 0]
+            bottom = boxes[..., 3] - points_per_img[..., 1]
 
-            width_cond = torch.logical_and(left_cond, right_cond)
-            height_cond = torch.logical_and(top_cond, bottom_cond)
-            cond = torch.logical_and(width_cond, height_cond)  # [NxK]
+            reg_targets_per_img = torch.stack([left, top, bottom, right], dim=-1)
+            within_boxes = reg_targets_per_img.min(dim=-1)[0] > 0
 
-            matched = torch.sum(cond, dim=1) > 0
+            # in the level range
+            max_reg_target_per_img = reg_targets_per_img.max(dim=-1)[0]
+            within_match_range = (max_reg_target_per_img > object_limits[:, 0][:, None]) & \
+                (max_reg_target_per_img < object_limits[:, 1][:, None])
+            matched = within_boxes & within_match_range
 
             # cost based on the areas of boxes
             box_areas = _area(boxes)
-            cond = cond.type(torch.int)
-            cost = cond * box_areas + (1 - cond) * torch.iinfo(torch.int).max
+            matched = matched.type(torch.int)
+            cost = matched * box_areas + (1 - matched) * INF
             cost_idxs = cost.argmin(dim=1)
 
             matched_idxs = torch.full((len(points_per_img), ), -1, dtype=torch.long, device=device)
-            matched_idxs[matched] = cost_idxs[matched]
+            cond = torch.sum(matched, dim=1) > 0
+            matched_idxs[cond] = cost_idxs[cond]
             all_matched_idxs.append(matched_idxs)
 
         loss = self.fcos_head.compute_loss(
