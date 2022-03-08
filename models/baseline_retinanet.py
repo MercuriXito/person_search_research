@@ -57,7 +57,7 @@ class PSRoIHead(nn.Module):
             features_shape = [list(feats.shape) for feats in features.values()]
             # feats_level_inds is required if using level_roi_pooling.
             proposals, labels, pid_labels, feats_level_inds = \
-                self.select_gt_training_samples(proposals, targets, features_shape, matched_idxs)
+                self.select_training_samples(proposals, targets, features_shape, matched_idxs)
 
         num_imgs = len(proposals)
         # roi_features = self.level_roi_pooling(features, proposals, feats_level_inds)

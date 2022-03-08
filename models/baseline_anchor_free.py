@@ -512,6 +512,8 @@ class AnchorFreePS(nn.Module):
                 pro_points = points.unbind(dim=0)
                 proposals = self.box_coder.decode(
                     pro_regression, pro_points, images.image_sizes)
+                # assert isinstance(proposals, torch.Tensor)
+                proposals = proposals.split(pro_points[0].shape[0])
                 assert isinstance(self.ps_roi_head, PSRoIHead)
                 ps_outs, ps_loss = self.ps_roi_head.forward(
                     features_dict, proposals, images.image_sizes,
