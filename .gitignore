@@ -1,3 +1,4 @@
+# ignored output or compiled folder
 .vscode
 data
 __pycache__
@@ -7,3 +8,8 @@ exps
 !exps/README.md
 outputs
 doc
+
+# scripts
+show_res_tables.py
+search.sh
+explorer_data.py

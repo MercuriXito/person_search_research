@@ -8,7 +8,13 @@ from typing import Dict, List
 from torchvision.models.detection.transform import GeneralizedRCNNTransform
 from torchvision.models.detection._utils import BoxCoder
 import torchvision.ops.boxes as box_ops
-from models.backbone import build_fpn_backbone
+from torchvision.ops.poolers import MultiScaleRoIAlign
+
+from models.losses import OIMLoss
+from models.backbone import build_fpn_backbone, \
+    build_faster_rcnn_based_multi_scale_backbone
+from models.baseline_retinanet import PSRoIHead
+from models.reid_head import ReIDEmbeddingHead
 
 INF = torch.iinfo(torch.int).max
 
@@ -164,9 +170,9 @@ class FCOSBoxCoder(BoxCoder):
         assert isinstance(points, (list, tuple))
 
         boxes = []
-        for red_codes_p, points_p in zip(rel_codes, points):
+        for red_codes_p, points_p, image_shape in zip(rel_codes, points, image_shapes):
             boxes.append(
-                self.decode_single(red_codes_p, points_p, image_shapes))
+                self.decode_single(red_codes_p, points_p, image_shape))
         boxes = torch.cat(boxes, dim=0)
         return boxes
 
@@ -443,6 +449,8 @@ class AnchorFreePS(nn.Module):
             backbone,
             fcos_head,
             transform,
+            # ps roi head
+            ps_roi_head=None,
             # other parameters
             topk_candidates=1000,
             detections_per_img=300,
@@ -468,6 +476,7 @@ class AnchorFreePS(nn.Module):
             [256, 512],
             [512, INF],
         ]
+        self.ps_roi_head = ps_roi_head
 
     def forward(self, images, targets=None, debug=False):
         """
@@ -492,13 +501,32 @@ class AnchorFreePS(nn.Module):
         points, feats_shapes, feats_strids = \
             self.reference_points(images, features)
 
-        detections, loss = [], []
+        detections, loss = {}, {}
         if self.training:
             loss, matched_idxs = \
                 self.compute_loss(points, head_outputs, targets, images.image_sizes, feats_shapes)
             detections = head_outputs
+
+            if self.ps_roi_head is not None:
+                pro_regression = head_outputs["bbox_regression"].unbind(dim=0)
+                pro_points = points.unbind(dim=0)
+                proposals = self.box_coder.decode(
+                    pro_regression, pro_points, images.image_sizes)
+                assert isinstance(self.ps_roi_head, PSRoIHead)
+                ps_outs, ps_loss = self.ps_roi_head.forward(
+                    features_dict, proposals, images.image_sizes,
+                    targets, matched_idxs=matched_idxs)
+                loss.update(ps_loss)
         else:
             detections = self.postprocess(points, head_outputs, feats_shapes, images.image_sizes)
+            if self.ps_roi_head is not None:
+                # append outputs from roi head
+                proposals = [det["boxes"] for det in detections]
+                # TODO: 3. features_levels in inference
+                ps_outs, _ = self.ps_roi_head.forward(features_dict, proposals, images.image_sizes)
+                for i in range(len(detections)):
+                    detections[i].update(ps_outs[i])
+
             detections = self.transform.postprocess(detections, images.image_sizes, original_image_sizes)
 
         if debug:
@@ -644,6 +672,29 @@ class AnchorFreePS(nn.Module):
     def extract_features_without_boxes(self, images):
         return self.forward(images)[0]
 
+    @torch.no_grad()
+    def extract_features_with_boxes(self, images, targets, feature_norm=True):
+        """ extract features with boxes.
+        """
+        images, targets = self.transform(images, targets)
+        features_dict = self.backbone(images.tensors)
+
+        proposals = [target["boxes"] for target in targets]
+        # assert isinstance(self.ps_roi_head, PSRoIHead)
+        roi_res, _ = self.ps_roi_head.forward(
+            features_dict, proposals, images.image_sizes)
+
+        embeddings = [res["embeddings"] for res in roi_res]
+        norms = [res["norm"] for res in roi_res]
+        if not feature_norm:
+            embeddings = [
+                embedding * norm
+                for embedding, norm in zip(embeddings, norms)
+            ]
+        assert len(targets) == 1, "only support batch_size = 1."
+        # NOTE: only support batch_size = 1
+        return embeddings[0]
+
 
 def build_anchor_free_based_models(args):
 
@@ -669,6 +720,61 @@ def build_anchor_free_based_models(args):
     return model
 
 
+def build_anchor_free_base_models_with_reid_head(args):
+    min_size = 800
+    max_size = 1333
+
+    # build tranform
+    image_mean = [0.485, 0.456, 0.406]
+    image_std = [0.229, 0.224, 0.225]
+    transform = GeneralizedRCNNTransform(min_size, max_size, image_mean, image_std)
+
+    # build fpn backbone
+    backbone = build_fpn_backbone(
+            args.model.backbone.name,
+            args.model.backbone.pretrained,
+            args.model.backbone.norm_layer
+    )
+
+    num_classes = 1
+    fcos_head = FCOSHead(256, num_classes=num_classes)
+
+    # model parameters
+    use_multi_scale = args.model.use_multi_scale
+    reid_feature_dim = args.model.reid_feature_dim
+    _, box_head = build_faster_rcnn_based_multi_scale_backbone(
+            args.model.backbone.name,
+            args.model.backbone.pretrained,
+            args.model.backbone.norm_layer,
+            return_res4=use_multi_scale)
+    # build reid head
+    representation_size = 1024
+    if use_multi_scale:
+        reid_head = ReIDEmbeddingHead(
+            featmap_names=["feat_res4", "feat_res5"],
+            in_channels=[256, representation_size],
+            dim=reid_feature_dim, feature_norm=True)
+    else:
+        reid_head = ReIDEmbeddingHead(
+            featmap_names=['feat_res5'], in_channels=[256],
+            dim=reid_feature_dim, feature_norm=True)
+    num_features = reid_feature_dim
+    num_pids = args.loss.oim.num_pids
+    num_cq_size = args.loss.oim.num_cq_size
+    oim_momentum = args.loss.oim.oim_momentum
+    oim_scalar = args.loss.oim.oim_scalar
+    oim_loss = OIMLoss(num_features, num_pids, num_cq_size, oim_momentum, oim_scalar)
+    box_roi_pool = MultiScaleRoIAlign(
+        featmap_names=['feat_res3', 'feat_res4', 'feat_res5'],
+        output_size=7,
+        sampling_ratio=2)
+    ps_roi_head = PSRoIHead(
+            box_roi_pool, box_head, reid_head, oim_loss)
+
+    model = AnchorFreePS(backbone, fcos_head, transform, ps_roi_head=ps_roi_head)
+    return model
+
+
 if __name__ == '__main__':
     from datasets.transforms import ToTensor
     from configs.faster_rcnn_default_configs import get_default_cfg
@@ -691,9 +797,13 @@ if __name__ == '__main__':
     targets = [target1, target2]
     images, targets = ship_to_cuda(images, targets, device)
 
-    model = build_anchor_free_based_models(args)
+    # model = build_anchor_free_based_models(args)
+    model = build_anchor_free_base_models_with_reid_head(args)
     model.load_state_dict(
-        torch.load("exps/exps_det/exps_fcos.det.giou_loss/checkpoint.pth", map_location="cpu")["model"]
+        torch.load(
+            "exps/exps_det/exps_fcos.imprv.det.iou_loss/checkpoint.pth",
+            map_location="cpu")["model"],
+        strict=False
     )
     model.to(device)
     model.eval()

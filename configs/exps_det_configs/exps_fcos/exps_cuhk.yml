@@ -1,0 +1,15 @@
+# cuhk with fcos based model
+
+model:
+  name: fcos
+train:
+  output_dir: exps/exps_det/exps_cuhk.fcos
+  batch_size: 2
+  loss_weights:
+      loss_oim: 1.0
+      loss_classifier: 1.0
+      loss_box_reg: 5.0
+      loss_objectness: 0.0
+      loss_rpn_box_reg: 0.0
+  epochs: 20
+
