@@ -97,6 +97,12 @@ class FasterRCNNExtractor(Person_Search_Features_Extractor):
             rois = rois.detach().cpu().numpy()
             features = features.detach().cpu().numpy()
 
+            if "centerness" in outputs:
+                centerness = outputs["centerness"]
+                centerness = centerness.view(-1, 1).detach().cpu().numpy()
+                import numpy as np
+                rois = np.concatenate([rois, centerness], axis=1)
+
             gallery_features.append(features)
             gallery_rois.append(rois)
 

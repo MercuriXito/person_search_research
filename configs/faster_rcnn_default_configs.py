@@ -150,6 +150,7 @@ _C.train.loss_weights.loss_oim = 1.0
 _C.train.loss_weights.loss_objectness = 2.0
 _C.train.loss_weights.loss_rpn_box_reg = 5.0
 _C.train.loss_weights.loss_graph = 0.0
+_C.train.loss_weights.loss_centerness = 1.0  # set for fcos
 
 _C.train.graph = CN()
 _C.train.graph.use_ema_lut = False

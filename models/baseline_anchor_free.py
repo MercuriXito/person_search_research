@@ -90,7 +90,7 @@ def iou_loss(proposals, target_boxes, eps=1e-6):
     area_a = _area(proposals)
     area_b = _area(target_boxes)
 
-    iou = inter / (area_a + area_b - inter + eps)
+    iou = (inter + 1.0) / (area_a + area_b - inter + 1.0)  # 1.0 preventing inf in torch.log
 
     # loss = 1 - iou
     loss = -torch.log(iou)
@@ -601,6 +601,7 @@ class AnchorFreePS(nn.Module):
             image_boxes = []
             image_scores = []
             image_labels = []
+            image_centerness = []
 
             for p_level, reg_level, cls_level, cet_level in \
                     zip(points_list, regression_list, cls_logits_list, centerness_list):
@@ -620,6 +621,10 @@ class AnchorFreePS(nn.Module):
                 scores_per_level, idxs = scores_per_level.topk(num_topk)
                 topk_idxs = topk_idxs[idxs]
 
+                # centerness outputs
+                centerness_per_level = centerness_per_level[keep_idxs]
+                centerness_per_level = centerness_per_level[idxs]
+
                 anchor_idxs = topk_idxs // num_classes
                 labels_per_level = topk_idxs % num_classes
 
@@ -630,10 +635,12 @@ class AnchorFreePS(nn.Module):
                 image_boxes.append(boxes_per_level)
                 image_scores.append(scores_per_level)
                 image_labels.append(labels_per_level)
+                image_centerness.append(centerness_per_level)
 
             image_boxes = torch.cat(image_boxes, dim=0)
             image_scores = torch.cat(image_scores, dim=0)
             image_labels = torch.cat(image_labels, dim=0)
+            image_centerness = torch.cat(image_centerness, dim=0)
 
             # non-maximum suppression
             keep = box_ops.batched_nms(image_boxes, image_scores, image_labels, self.nms_thresh)
@@ -643,6 +650,7 @@ class AnchorFreePS(nn.Module):
                 'boxes': image_boxes[keep],
                 'scores': image_scores[keep],
                 'labels': image_labels[keep],
+                'centerness': image_centerness[keep]
             })
 
         return detections
