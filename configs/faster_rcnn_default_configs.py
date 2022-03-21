@@ -70,6 +70,9 @@ _C.model.roi_head.detections_per_image_test = 300
 _C.model.roi_head.k_sampling = False
 _C.model.roi_head.k = 16
 
+# subnet, only used in model with fpn
+_C.model.roi_head.use_layer4 = False
+
 # -------------------------------------------------------- #
 #             Additional Contex Graph Head                 #
 # -------------------------------------------------------- #

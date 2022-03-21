@@ -884,10 +884,11 @@ class RetinaNet(nn.Module):
 def build_retinanet_based_models(args):
 
     # build backbone
-    backbone = build_fpn_backbone(
+    backbone, roi_net = build_fpn_backbone(
             args.model.backbone.name,
             args.model.backbone.pretrained,
-            args.model.backbone.norm_layer)
+            args.model.backbone.norm_layer,
+            build_head=True)
     num_classes = 1  # excluding the background
 
     # build tranform
@@ -910,22 +911,28 @@ def build_retinanet_based_models(args):
     # model parameters
     use_multi_scale = args.model.use_multi_scale
     reid_feature_dim = args.model.reid_feature_dim
+
     # build person search head
-    _, box_head = build_faster_rcnn_based_multi_scale_backbone(
-            args.model.backbone.name,
-            args.model.backbone.pretrained,
-            args.model.backbone.norm_layer,
-            return_res4=use_multi_scale)
+    if args.model.roi_head.use_layer4:
+        box_head = roi_net
+    else:
+        _, box_head = build_faster_rcnn_based_multi_scale_backbone(
+                args.model.backbone.name,
+                args.model.backbone.pretrained,
+                args.model.backbone.norm_layer,
+                return_res4=use_multi_scale)
+
     # build reid head
-    representation_size = 1024
+    representation_size = box_head.out_channels
     if use_multi_scale:
         reid_head = ReIDEmbeddingHead(
             featmap_names=["feat_res4", "feat_res5"],
-            in_channels=[256, representation_size],
+            in_channels=representation_size,
             dim=reid_feature_dim, feature_norm=True)
     else:
         reid_head = ReIDEmbeddingHead(
-            featmap_names=['feat_res5'], in_channels=[256],
+            featmap_names=['feat_res5'],
+            in_channels=[representation_size[-1]],
             dim=reid_feature_dim, feature_norm=True)
     # build oim loss
     num_features = reid_feature_dim
@@ -999,10 +1006,12 @@ if __name__ == '__main__':
         torch.load(
             # "exps/exps_det/exps_retinanet.det/checkpoint.pth",
             # "exps/exps_det/exps_cuhk.retinanet/checkpoint0019.pth",
-            "exps/exps_det/exps_cuhk.retinanet.fpn_reid_head.sample/checkpoint0020.pth",
+            # "exps/exps_det/exps_cuhk.retinanet.fpn_reid_head.sample/checkpoint0020.pth",
+            "exps/exps_det/exps_cuhk.retinanet.loss_weights.iter/checkpoint.pth",
+            # "exps/exps_det/exps_cuhk.retinanet.loss_weights.iter.new_head.large1024/checkpoint.pth",
             map_location="cpu"
         )["model"],
-        strict=False
+        strict=True
     )
 
     model.to(device)

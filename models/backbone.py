@@ -8,9 +8,9 @@ import torchvision
 from torchvision.models._utils import IntermediateLayerGetter
 from torchvision.models.detection.backbone_utils import FeaturePyramidNetwork, \
     BackboneWithFPN
-from torchvision.models.detection.faster_rcnn import TwoMLPHead
 from torchvision.models.resnet import __all__
 from torchvision.ops.feature_pyramid_network import LastLevelP6P7
+from torchvision.models.resnet import Bottleneck, conv1x1
 
 
 class FrozenBatchNorm1d(nn.Module):
@@ -145,24 +145,32 @@ class Backbone(nn.Sequential):
 
 
 class RCNNConvHead(nn.Sequential):
-    def __init__(self, backbone, return_res4=True, GAP=True):
+    def __init__(self, subnet, return_res4=True, GAP=True):
+        assert isinstance(subnet, nn.Module)
+        assert hasattr(subnet, "in_channels")
+        assert hasattr(subnet, "out_channels")
         super(RCNNConvHead, self).__init__(
             OrderedDict(
-                [['layer4', backbone.layer4]]  # res5
+                [['layer4', subnet]]  # res5
             )
         )
         self.return_res4 = return_res4
         if self.return_res4:
-            self.out_channels = [1024, 2048]
+            self.out_channels = [subnet.in_channels, subnet.out_channels]
         else:
-            self.out_channels = [2048]
+            self.out_channels = [subnet.out_channels]
         self.GAP = GAP
 
     def forward(self, x):
         feat = super(RCNNConvHead, self).forward(x)
         if self.GAP:
-            x = F.adaptive_max_pool2d(x, 1)
-            feat = F.adaptive_max_pool2d(feat, 1)
+            # enable zero-batch input for F.adaptive_max_pool2d
+            # this feature has been added in new version of pytorch
+            # see issue: https://github.com/pytorch/pytorch/pull/62088
+            pooling_func = F.adaptive_avg_pool2d \
+                if x.numel() == 0 else F.adaptive_max_pool2d
+            x = pooling_func(x, 1)
+            feat = pooling_func(feat, 1)
         if self.return_res4:
             return OrderedDict([
                 ['feat_res4', x],  # Global average pooling
@@ -226,11 +234,9 @@ class MSTwoMLPHead(nn.Module):
         feat = F.relu(self.fc7(feat))
 
         if self.GAP:
-            # TODO: change AdaMaxPool2d to AdaAvgPool2d.
-            if x.numel() == 0:
-                x = F.adaptive_avg_pool2d(x, 1).flatten(start_dim=1)
-            else:
-                x = F.adaptive_max_pool2d(x, 1).flatten(start_dim=1)
+            pooling_func = F.adaptive_avg_pool2d \
+                if x.numel() == 0 else F.adaptive_max_pool2d
+            x = pooling_func(x, 1).flatten(start_dim=1)
         if self.return_res4:
             return OrderedDict([
                 ['feat_res4', x],  # Global average pooling
@@ -256,7 +262,15 @@ def build_faster_rcnn_based_backbone(
     backbone.bn1.bias.requires_grad_(False)
 
     stem = Backbone(backbone)
-    head = RCNNConvHead(backbone, return_res4, GAP)
+    layer4 = backbone.layer4
+    out_channels = [
+        layer for name, layer in layer4.named_modules()
+        if "conv" in name.lower()
+    ][-1].out_channels
+    setattr(layer4, "in_channels", layer4[0].conv1.in_channels)
+    setattr(layer4, "out_channels", out_channels)
+
+    head = RCNNConvHead(backbone.layer4, return_res4, GAP)
     return stem, head
 
 
@@ -284,8 +298,6 @@ def build_faster_rcnn_based_multi_scale_backbone(
     #     if name.startswith("layer1"):
     #         param.requires_grad_(False)
 
-    # split_stem = Backbone(backbone)
-    # head = RCNNConvHead(backbone, return_res4, GAP)
     stem = BackboneWithFPN(
         backbone,
         return_layers=dict(
@@ -297,10 +309,7 @@ def build_faster_rcnn_based_multi_scale_backbone(
         in_channels_list=[256, 512, 1024, 2048],
         out_channels=256,
     )
-    # HACK: out_channel is fixed
     setattr(stem, "out_channels", 256)
-    # head = MSBoxHead(
-    #     stem.out_channels, 1024, return_res4, GAP)
     head = MSTwoMLPHead(
         stem.out_channels, 1024, 7,
         return_res4, GAP
@@ -309,7 +318,8 @@ def build_faster_rcnn_based_multi_scale_backbone(
 
 
 def build_fpn_backbone(
-        backbone_name, pretrained, norm_layer="bn"):
+        backbone_name, pretrained, norm_layer="bn",
+        build_head=False):
 
     assert backbone_name in __all__, f"{backbone_name} not found."
     norm_layer = get_norm_layer(norm_layer)
@@ -339,4 +349,46 @@ def build_fpn_backbone(
 
     modules = nn.Sequential(body, fpn)
     setattr(modules, "out_channels", 256)
+
+    if build_head:
+        # output channels = planes * 4
+        planes = 256
+        inplanes = modules.out_channels
+        head = build_resnet_like_layer(
+            norm_layer, inplanes=inplanes, planes=planes)
+        setattr(head, "in_channels", inplanes)
+        setattr(head, "out_channels", planes * 4)
+        conv_head = RCNNConvHead(head, True, True)
+        return modules, conv_head
     return modules
+
+
+def build_resnet_like_layer(
+            norm_layer,
+            inplanes=1024,  # input channels
+            planes=512,  # 4 * planes == output channels
+            blocks=3,  # number of block
+            # the rest could use default settings.
+            stride=2,
+            previous_dilation=1,
+            dilation=1,
+            groups=1,
+            width=64,
+            block=Bottleneck):
+    """ adapted from Resnet._make_layers.
+    """
+    layers = []
+    if stride != 1 or inplanes != planes * block.expansion:
+        downsample = nn.Sequential(
+            conv1x1(inplanes, planes * block.expansion, stride),
+            norm_layer(planes * block.expansion),
+        )
+    layers.append(block(
+        inplanes, planes, stride, downsample, groups,
+        width, previous_dilation, norm_layer))
+    new_inplanes = planes * block.expansion
+    for _ in range(1, blocks):
+        layers.append(block(
+            new_inplanes, planes, groups=groups,
+            base_width=width, dilation=dilation, norm_layer=norm_layer))
+    return nn.Sequential(*layers)

@@ -740,33 +740,37 @@ def build_anchor_free_base_models_with_reid_head(args):
     transform = GeneralizedRCNNTransform(min_size, max_size, image_mean, image_std)
 
     # build fpn backbone
-    backbone = build_fpn_backbone(
+    backbone, roi_net = build_fpn_backbone(
             args.model.backbone.name,
             args.model.backbone.pretrained,
-            args.model.backbone.norm_layer
-    )
-
-    num_classes = 1
+            args.model.backbone.norm_layer,
+            build_head=True)
+    num_classes = 1  # excluding the background
     fcos_head = FCOSHead(256, num_classes=num_classes)
 
     # model parameters
     use_multi_scale = args.model.use_multi_scale
     reid_feature_dim = args.model.reid_feature_dim
-    _, box_head = build_faster_rcnn_based_multi_scale_backbone(
-            args.model.backbone.name,
-            args.model.backbone.pretrained,
-            args.model.backbone.norm_layer,
-            return_res4=use_multi_scale)
+    if args.model.roi_head.use_layer4:
+        box_head = roi_net
+    else:
+        _, box_head = build_faster_rcnn_based_multi_scale_backbone(
+                args.model.backbone.name,
+                args.model.backbone.pretrained,
+                args.model.backbone.norm_layer,
+                return_res4=use_multi_scale)
+
     # build reid head
-    representation_size = 1024
+    representation_size = box_head.out_channels
     if use_multi_scale:
         reid_head = ReIDEmbeddingHead(
             featmap_names=["feat_res4", "feat_res5"],
-            in_channels=[256, representation_size],
+            in_channels=representation_size,
             dim=reid_feature_dim, feature_norm=True)
     else:
         reid_head = ReIDEmbeddingHead(
-            featmap_names=['feat_res5'], in_channels=[256],
+            featmap_names=['feat_res5'],
+            in_channels=[representation_size[-1]],
             dim=reid_feature_dim, feature_norm=True)
     num_features = reid_feature_dim
     num_pids = args.loss.oim.num_pids
@@ -809,9 +813,10 @@ if __name__ == '__main__':
 
     # model = build_anchor_free_based_models(args)
     model = build_anchor_free_base_models_with_reid_head(args)
-    model.load_state_dict(
+    mkeys, ukeys = model.load_state_dict(
         torch.load(
-            "exps/exps_det/exps_fcos.imprv.det.iou_loss/checkpoint.pth",
+            # "exps/exps_det/exps_fcos.imprv.det.iou_loss/checkpoint.pth",
+            "exps/exps_det/exps_cuhk.fcos.loss_cls_5.center.iter/checkpoint.pth",
             map_location="cpu")["model"],
         strict=False
     )
