@@ -1,0 +1,16 @@
+# RetinaNet baseline with the same reid head structure
+# with sampling method the same with RetinaNet
+
+model:
+  name: retinanet
+train:
+  output_dir: exps/exps_det/exps_cuhk.retinanet.loss_weights.iter
+  batch_size: 2
+  loss_weights:
+      loss_oim: 1.0
+      loss_classifier: 5.0
+      loss_box_reg: 5.0
+      loss_objectness: 0.0
+      loss_rpn_box_reg: 0.0
+  epochs: 20
+
