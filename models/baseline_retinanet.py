@@ -888,7 +888,8 @@ def build_retinanet_based_models(args):
             args.model.backbone.name,
             args.model.backbone.pretrained,
             args.model.backbone.norm_layer,
-            build_head=True)
+            build_head=True,
+            rep_size=args.model.roi_head.layer4_rep_size)
     num_classes = 1  # excluding the background
 
     # build tranform

@@ -693,7 +693,7 @@ class FastGraphPSEvaluator(GraphPSEvaluator):
             imgs, rois = [], []
             count_gt, count_tp = 0, 0
             # Get L2-normalized feature vector
-            feat_p = probe_feat[i]
+            feat_p = probe_feat[i]  # TODO: is this a bug?
             # Ignore the probe image
             probe_imname = str(protoc['Query'][si]['imname'][0, 0][0])
             probe_roi = protoc['Query'][si][

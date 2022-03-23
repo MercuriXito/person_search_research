@@ -72,6 +72,7 @@ _C.model.roi_head.k = 16
 
 # subnet, only used in model with fpn
 _C.model.roi_head.use_layer4 = False
+_C.model.roi_head.layer4_rep_size = 1024
 
 # -------------------------------------------------------- #
 #             Additional Contex Graph Head                 #

@@ -25,5 +25,5 @@ def load_eval_datasets(args):
         root = "data/prw"
         imdb = PRW(root, transforms=None, mode="test")
     else:
-        raise NotImplementedError(f"dataset {args.datset_file} no found.")
+        raise NotImplementedError(f"dataset {args.dataset_file} no found.")
     return imdb

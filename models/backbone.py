@@ -319,7 +319,8 @@ def build_faster_rcnn_based_multi_scale_backbone(
 
 def build_fpn_backbone(
         backbone_name, pretrained, norm_layer="bn",
-        build_head=False):
+        build_head=False,
+        rep_size=1024):
 
     assert backbone_name in __all__, f"{backbone_name} not found."
     norm_layer = get_norm_layer(norm_layer)
@@ -352,7 +353,7 @@ def build_fpn_backbone(
 
     if build_head:
         # output channels = planes * 4
-        planes = 256
+        planes = rep_size // 4
         inplanes = modules.out_channels
         head = build_resnet_like_layer(
             norm_layer, inplanes=inplanes, planes=planes)

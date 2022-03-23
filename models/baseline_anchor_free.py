@@ -744,7 +744,8 @@ def build_anchor_free_base_models_with_reid_head(args):
             args.model.backbone.name,
             args.model.backbone.pretrained,
             args.model.backbone.norm_layer,
-            build_head=True)
+            build_head=True,
+            rep_size=args.model.roi_head.layer4_rep_size)
     num_classes = 1  # excluding the background
     fcos_head = FCOSHead(256, num_classes=num_classes)
 

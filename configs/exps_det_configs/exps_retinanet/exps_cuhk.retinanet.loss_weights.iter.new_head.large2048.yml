@@ -6,8 +6,9 @@ model:
   name: retinanet
   roi_head:
     use_layer4: True
+    layer4_rep_size: 2048
 train:
-  output_dir: exps/exps_det/exps_cuhk.retinanet.loss_weights.iter.new_head.large1024
+  output_dir: exps/exps_det/exps_cuhk.retinanet.loss_weights.iter.new_head.large2048
   batch_size: 2
   loss_weights:
       loss_oim: 1.0

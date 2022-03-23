@@ -1,13 +1,13 @@
 # RetinaNet baseline with the same reid head structure
 # with sampling method the same with RetinaNet
 # with new structure
+# single scale features.
 
 model:
   name: retinanet
-  roi_head:
-    use_layer4: True
+  use_multi_scale: false
 train:
-  output_dir: exps/exps_det/exps_cuhk.retinanet.loss_weights.iter.new_head.large1024
+  output_dir: exps/exps_det/exps_cuhk.retinanet.loss_weights.iter.single
   batch_size: 2
   loss_weights:
       loss_oim: 1.0
