@@ -14,6 +14,9 @@ from utils.misc import pickle, unpickle, _compute_iou
 
 
 class PRW(PersonSearchDataset):
+    def __init__(self, root, transforms, mode):
+        super().__init__(root, transforms, mode=mode)
+        self.trainset_num_pids = 482
 
     def get_data_path(self):
         return osp.join(self.root, 'frames')

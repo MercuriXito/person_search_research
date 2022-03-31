@@ -4,6 +4,7 @@ import torch
 import cv2
 import numpy as np
 from tqdm import tqdm
+from datetime import datetime
 from collections import defaultdict, Counter
 import matplotlib.pyplot as plt
 
@@ -18,6 +19,10 @@ from configs.faster_rcnn_default_configs import get_default_cfg
 from utils.misc import pickle, unpickle
 from utils.vis import compute_ap
 from utils.vis import draw_boxes_text
+
+
+def get_current_time():
+    return datetime.ctime(datetime.today())
 
 
 def get_all_query_persons(imdb):
@@ -246,9 +251,7 @@ def visualize_topK_missed():
             gimg = cv2.imread(gimg)
 
             gimg = draw_boxes_text(gimg, g_boxes)
-            cv2.imwrite(
-                os.path.join(probe_path, f"rank_{idx:02d}_{bool(correct)}_{gname}"),
-                gimg)
+            cv2.imwrite(os.path.join(probe_path, f"rank_{idx:02d}_{bool(correct)}_{gname}"), gimg)
 
 
 # -------------------- vis compared badcase -------------------------------
@@ -364,8 +367,171 @@ def visualize_ap_worse_samples():
                 gimg)
 
 
+class BadCaseAnalyst:
+    def __init__(self, pkl_path):
+        self.pkl_path = pkl_path
+        self.badcase_criterion = self._is_top1_missied
+        save_root = self.pkl_path + ".vis_badcase"
+        self.vis_save_root = save_root
+
+        # load results in pickle
+        eval_data, pkl_data = load_pickle_and_eval(self.pkl_path)
+        self.eval_data = eval_data
+        self.pkl_data = pkl_data
+
+        # args and dataset
+        self.eval_args = pkl_data["eval_args"]
+        self.dataset = load_eval_datasets(self.eval_args)
+
+        # mapping
+        self.gallery_name_to_idx_map = dict([
+            (item["im_name"], idx)
+            for idx, item in enumerate(self.dataset.roidb)
+        ])
+        # hard to deal with duplicate probe.
+        self.query_name_to_idx_map = dict([
+            (item["im_name"], idx)
+            for idx, item in enumerate(self.dataset.probes)
+        ])
+
+        self.badcase_indices = self.generate_badcase_list()
+        print("Badcase analysis on {}".format(self.pkl_path))
+        print("Eval args: \n{}".format(self.eval_args))
+
+    def _is_top1_missied(self, ret_item):
+        """ badcase criterion: gt Top-1 missed.
+        """
+        return ret_item["gallery"][0]["correct"] != 1
+
+    def write_info(self, path):
+        vfile = os.path.join(path, "version.txt")
+        with open(vfile, "w") as f:
+            f.write(get_current_time() + "\n")
+            f.write(self.pkl_path + "\n")
+
+    def generate_badcase_list(self):
+        badcase_indices = []  # indices of query badcase
+        badnames = []
+        for idx, item in enumerate(tqdm((self.eval_data["results"]))):
+            if not self.badcase_criterion(item):
+                continue
+            badcase_indices.append(idx)
+            badnames.append(item["probe_img"])
+        return badcase_indices
+
+    def get_statistics(self, indices):
+        # average detected boxes in gallery
+        data = []
+        for idx in indices:
+            item = self.eval_data["results"][idx]
+            # query_name = item["probe_img"]
+            # assert self.query_name_to_idx_map[query_name] == idx
+            num_qboxes = len(self.pkl_data["query_boxes"][idx])
+
+            num_gboxes = []
+            for gitem in item["gallery"]:
+                gname = gitem["img"]
+                gidx = self.gallery_name_to_idx_map[gname]
+                num_gbox = len(self.pkl_data["gallery_boxes"][gidx])
+                num_gboxes.append(num_gbox)
+            avg_num_gboxes = np.asarray(num_gboxes).mean()
+            # data.append(num_qboxes + avg_num_gboxes)
+            data.append(avg_num_gboxes)
+
+        data = np.asarray(data)
+        return data
+
+
+class DenseAnalyst(BadCaseAnalyst):
+    def get_ap_top1_statistics(self, indices):
+        # average detected boxes in gallery
+        data = []
+        for idx in indices:
+            item = self.eval_data["results"][idx]
+            num_qboxes = len(self.pkl_data["query_boxes"][idx])
+
+            num_gboxes = []
+            for gitem in item["gallery"]:
+                gname = gitem["img"]
+                gidx = self.gallery_name_to_idx_map[gname]
+                num_gbox = len(self.pkl_data["gallery_boxes"][gidx])
+                num_gboxes.append(num_gbox)
+            avg_num_gboxes = np.asarray(num_gboxes).mean() + num_qboxes
+            # other options, which works?
+            # avg_num_gboxes = min(avg_num_gboxes, num_qboxes)
+            # avg_num_gboxes = num_qboxes
+
+            num_gt = len(item["probe_gt"])
+            # ap
+            rank_list = np.array([gitem["correct"] for gitem in item["gallery"]])
+            ap = compute_ap(rank_list, num_gt) if num_gt > 0 else 0.0
+            # Top-K
+            heats = [gitem["correct"] for gitem in item["gallery"]]
+            heat_rate = [sum(heats[:k]) / min(k, num_gt) for k in [1, 5, 10]]
+            res = [avg_num_gboxes, ap] + heat_rate
+            data.append(res)
+
+        data = np.asarray(data)
+        return data
+
+    def vis_statistics(self):
+        vis_save_root = os.path.join("exps/vis", self.pkl_path)
+        os.makedirs(vis_save_root, exist_ok=True)
+
+        all_indices = list(range(len(self.dataset.probes)))
+        normal = self.get_ap_top1_statistics(all_indices)
+
+        size = 10  # marker size
+        # ap vs number
+        fig, ax = plt.subplots()
+        ax.scatter(normal[:, 1], normal[:, 0], s=size)
+        fig.savefig(os.path.join(
+            vis_save_root, "scatter_number_over_ap.png"))
+
+        fig, axes = plt.subplots(2, 2, figsize=(15, 15))
+        for idx, stat_name in enumerate(["ap", "top1", "top5", "top10"]):
+            ridx, cidx = idx // 2, idx % 2
+            ax = axes[ridx, cidx]
+            ax.scatter(normal[:, 0], normal[:, 1 + idx], s=size)
+            ax.set_xlabel("Number of persons")
+            ax.set_ylabel(stat_name)
+            ax.set_ylim([-0.1, 1.1])
+            ax.grid()
+        fig.savefig(os.path.join(
+            vis_save_root, "scatter_stat_over_number.png"), dpi=600)
+
+        # collector
+        fig, axes = plt.subplots(2, 2, figsize=(15, 15))
+        for idx, stat_name in enumerate(["ap", "top1", "top5", "top10"]):
+            nums = normal[:, 0]
+            data = normal[:, 1 + idx]
+
+            collector = defaultdict(list)
+            for n, d in zip(nums, data):
+                collector[n].append(d)
+            stats = []
+            for n, ds in collector.items():
+                stats.append([n, sum(ds) / len(ds)])
+            nums, data = np.asarray(stats).T
+
+            ridx, cidx = idx // 2, idx % 2
+            ax = axes[ridx, cidx]
+            ax.scatter(nums, data, s=size)
+            ax.set_xlabel("Number of persons")
+            ax.set_ylabel("Average stats of {}".format(stat_name))
+            ax.set_ylim([-0.1, 1.1])
+            ax.grid()
+        fig.savefig(os.path.join(
+            vis_save_root, "scatter_mean_topk_res.png"), dpi=600)
+
+
 if __name__ == '__main__':
     # main()
     # main_diff_map()
-    main_aps()
+    # main_aps()
     # visualize_ap_worse_samples()
+    # visualize_topK_missed()
+
+    pkl_path = get_args().pkl
+    analysist = DenseAnalyst(pkl_path)
+    analysist.vis_statistics()
