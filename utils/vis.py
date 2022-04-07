@@ -113,5 +113,24 @@ def draw_boxes_text(
     return cimage
 
 
+def draw_heatmap(image, heatmap, alpha=0.6):
+    """ return image * alpha + heatmap * (1 - alpha)
+    """
+
+    if image.dtype != np.uint8:
+        # prcoess image
+        image = np.clip(image, 0, 1) * 255.0
+    if heatmap.dtype != np.uint8:
+        # process heatmap
+        heatmap = np.clip(heatmap, 0, 1) * 255.0
+        heatmap = heatmap.astype(np.uint8)
+
+    # heatmap
+    heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
+    image = image * alpha + heatmap * (1-alpha)
+    image = image.astype(np.uint8)
+    return image
+
+
 if __name__ == '__main__':
     pass

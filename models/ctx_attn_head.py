@@ -181,7 +181,8 @@ class ContextGraphHead(nn.Module):
         """
         img_indices is required.
         """
-        assert feats_lut is not None
+        if self.training:
+            assert feats_lut is not None
 
         # input from detections
         img_indices = [t["item_id"] for t in targets]

@@ -19,7 +19,7 @@ class GraphNet(BaseNet):
         super().__init__(backbone, rpn, roi_head, transform)
         self.graph_head = graph_head
 
-    def forward(self, images, targets, feats_lut=None):
+    def forward(self, images, targets=None, feats_lut=None):
         """
         args:
             - image: List[Tensor]
@@ -40,11 +40,15 @@ class GraphNet(BaseNet):
         features_dict = self.backbone(images.tensors)
         rpn_features = {"feat_res4": features_dict["feat_res4"]}
         proposals, proposal_losses = self.rpn(images, rpn_features, targets)
+        roi_features = {"feat_res4": features_dict["feat_res4"]}
         detections, detector_losses = self.roi_heads(
-            features_dict, proposals, images.image_sizes, targets)
+            roi_features, proposals, images.image_sizes, targets)
 
         # additional branch for graph head
-        graph_outs, graph_losses = self.graph_head(detections, targets, feats_lut)
+        if self.training:
+            graph_outs, graph_losses = self.graph_head(detections, targets, feats_lut)
+        else:
+            graph_losses = {}
         detections = self.transform.postprocess(
             detections, images.image_sizes, original_image_sizes)
 

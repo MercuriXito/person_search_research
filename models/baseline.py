@@ -38,8 +38,9 @@ class BaseNet(GeneralizedRCNN):
         features_dict = self.backbone(images.tensors)
         rpn_features = {"feat_res4": features_dict["feat_res4"]}
         proposals, proposal_losses = self.rpn(images, rpn_features, targets)
+        roi_features = {"feat_res4": features_dict["feat_res4"]}
         detections, detector_losses = self.roi_heads(
-            features_dict, proposals, images.image_sizes, targets)
+            roi_features, proposals, images.image_sizes, targets)
         detections = self.transform.postprocess(
             detections, images.image_sizes, original_image_sizes)
 
@@ -134,8 +135,9 @@ class BaseNet(GeneralizedRCNN):
         features_dict = self.backbone(images.tensors)
         rpn_features = {"feat_res4": features_dict["feat_res4"]}
         proposals, _ = self.rpn(images, rpn_features, targets)
+        roi_features = {"feat_res4": features_dict["feat_res4"]}
         detections, _ = self.roi_heads(
-            features_dict, proposals, images.image_sizes, targets)
+            roi_features, proposals, images.image_sizes, targets)
         detections = self.transform.postprocess(
             detections, images.image_sizes, original_image_sizes)
         return detections
