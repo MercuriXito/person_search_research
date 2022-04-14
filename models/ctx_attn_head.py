@@ -426,7 +426,7 @@ class DecoderGraph(nn.Module):
             return sim_mat, graph_loss
         return sim_mat
 
-    def inference_features(self, gfeats, qfeats):
+    def inference_features(self, qfeats, gfeats):
 
         # reshape to sequence-like input
         qfeats = qfeats.view(-1, 1, self.feat_dim)
