@@ -6,6 +6,7 @@ test*.py
 test/*
 exps
 !exps/README.md
+!bin/exps/
 outputs
 doc
 
