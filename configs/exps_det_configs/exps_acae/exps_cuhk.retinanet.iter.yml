@@ -1,0 +1,26 @@
+# RetinaNet baseline with the same reid head structure
+# with sampling method the same with RetinaNet
+# with new structure
+# iter in hack settings.
+
+model:
+  name: retinanet
+  roi_head:
+    use_layer4: True
+    layer4_rep_size: 2048
+  graph_head:
+    loss:
+      name: "contrastive"
+      margin: 0.35
+train:
+  output_dir: exps/exps_det_acae/exps_cuhk.retinanet.iter
+  batch_size: 2
+  loss_weights:
+    loss_oim: 1.0
+    loss_classifier: 5.0
+    loss_box_reg: 5.0
+    loss_objectness: 0.0
+    loss_rpn_box_reg: 0.0
+    loss_graph: 10.0
+  epochs: 20
+

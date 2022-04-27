@@ -12,6 +12,7 @@ import random
 from torch import optim
 from torch.utils.data.dataloader import DataLoader
 from torch.utils.data.sampler import RandomSampler, BatchSampler
+from torch.optim.lr_scheduler import _LRScheduler
 
 from models.ctx_attn_head import ImageFeaturesLut
 from models import build_graph_models
@@ -19,6 +20,10 @@ from datasets import build_trainset
 import utils.misc as utils
 from utils.logger import MetricLogger
 from utils.misc import ship_to_cuda, yaml_dump
+from models.iter_trainer import WarmupMultiStepLR
+
+
+ITER_TRAIN = False
 
 
 def collate(batch):
@@ -41,6 +46,7 @@ def save_config(args, filename):
 
 def train_one_epoch(
         model, data_loader: Iterable, optimizer: torch.optim.Optimizer,
+        lr_scheduler: _LRScheduler,
         device: torch.device, loss_weights: dict, feats_lut: ImageFeaturesLut,
         epoch: int, max_norm: float = 0):
     model.train()
@@ -66,9 +72,11 @@ def train_one_epoch(
         else:
             grad_total_norm = utils.get_total_grad_norm(model.parameters(), max_norm)
         optimizer.step()
+        if ITER_TRAIN:
+            lr_scheduler.step()
 
         metric_logger.update(**loss_dict)
-        metric_logger.update(loss=sum(list(loss_dict.values())).item())
+        metric_logger.update(loss=losses.item())
         metric_logger.update(grad_norm=grad_total_norm)
         torch.cuda.empty_cache()
     print("Averaged stats:", metric_logger)
@@ -77,6 +85,7 @@ def train_one_epoch(
 
 def main(args):
     device = torch.device(args.device)
+    # device = torch.device("cpu")
     torch.random.manual_seed(args.seed)
     torch.cuda.manual_seed(args.seed)
     np.random.seed(args.seed)
@@ -98,10 +107,22 @@ def main(args):
     # build model
     model = build_graph_models(args)
     model.to(device)
+    ITER_TRAIN = args.model.name == "fcos" or args.model.name == "retinanet"
 
     # build optimizer
     optimizer = optim.AdamW(model.parameters(), lr=args.train.lr, weight_decay=args.train.weight_decay)
-    lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, args.train.lr_drop_epochs)
+    if ITER_TRAIN:
+        iteration_one_epoch = len(dataset) // args.train.batch_size
+        milestones = [step * iteration_one_epoch for step in args.train.lr_drop_epochs]
+        lr_scheduler = WarmupMultiStepLR(
+            optimizer,
+            milestones=milestones,
+            gamma=0.1,
+            warmup_factor=1/3.0,
+            warmup_iters=iteration_one_epoch,
+        )
+    else:
+        lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, args.train.lr_drop_epochs)
 
     # load previous trained model
     checkpoint_path = args.train.resume
@@ -134,9 +155,10 @@ def main(args):
     start_time = time.time()
     for epoch in range(start_epoch, args.train.epochs + 1):
         train_stats = train_one_epoch(
-            model, dataloader, optimizer, device,
-            loss_weights, feats_lut, epoch, args.train.clip_max_norm)
-        lr_scheduler.step()
+            model, dataloader, optimizer, lr_scheduler,
+            device, loss_weights, feats_lut, epoch, args.train.clip_max_norm)
+        if not ITER_TRAIN:
+            lr_scheduler.step()
         if args.train.output_dir:
             checkpoint_paths = [output_dir / 'checkpoint.pth']
             # extra checkpoint before LR drop and every 5 epochs

@@ -1,0 +1,18 @@
+# freeze training experiments:
+# - CUHK-SYSU; 
+# - w/ ACAE
+# - frozen backbone
+# - contrastive loss
+# - wo_lut: hack settings, using pair_graph_trainer to train.
+
+train:
+  output_dir: exps/exps_acae/exps_cuhk.closs_35.wo_lut
+  batch_size: 2
+  loss_weights:
+    loss_graph: 10.0
+model:
+  graph_head:
+    loss:
+      name: "contrastive"
+      margin: 0.35
+

@@ -1,0 +1,20 @@
+# BN in backbone: HACK settings
+
+model:
+  name: fpn
+  graph_head:
+    loss:
+      name: "contrastive"
+      margin: 0.35
+train:
+  output_dir: exps/exps_det_acae/exps_cuhk.fpn
+  batch_size: 2
+  loss_weights:
+    loss_oim: 1.0
+    loss_classifier: 1.0
+    loss_box_reg: 5.0
+    loss_objectness: 1.0
+    loss_rpn_box_reg: 5.0
+    loss_graph: 10.0
+  epochs: 20
+

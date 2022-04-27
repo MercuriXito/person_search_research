@@ -1,3 +1,8 @@
+""" For experiments: training without lut.
+For training without lut, one must:
+    - use PairSampler to ensure that indices of two samples are consecutive.
+    - in dataset
+"""
 import torch
 import time
 import datetime
@@ -12,15 +17,43 @@ import random
 from torch import optim
 from torch.utils.data.dataloader import DataLoader
 from torch.utils.data.sampler import RandomSampler, BatchSampler
-from yacs.config import CfgNode
-
-from models.ctx_attn_head import ImageFeaturesLut
-# from models.graph_net import build_graph_net
-from models import build_graph_models
 from datasets import build_trainset
+
+from models import build_graph_models
 import utils.misc as utils
 from utils.logger import MetricLogger
 from utils.misc import ship_to_cuda, yaml_dump
+
+
+class PairSampler(RandomSampler):
+    """ PairSampler: keep the consecutive order of a pair the same.
+    """
+    def __init__(self, data_source, ref_inds: list,
+                 replacement=False, num_samples=None, generator=None):
+        super().__init__(data_source, replacement, num_samples, generator)
+        assert len(self.data_source) % 2 == 0, "number of samples should be even."
+        self.ref_inds = ref_inds
+        assert len(data_source) == len(self.ref_inds)
+
+    def __iter__(self):
+        n = len(self.data_source)
+        inds = torch.arange(0, n, dtype=torch.int64)
+        ref_inds = torch.tensor(self.ref_inds, dtype=torch.int64)
+        inds = torch.cat([x.view(-1, 1) for x in [inds, ref_inds]], dim=1)
+
+        nn = len(inds) // 2  # to keep the number of training samples the same.
+        if self.replacement:
+            perm_inds = torch.randint(high=nn, size=(self.num_samples,), dtype=torch.int64, generator=self.generator)
+        else:
+            perm_inds = torch.randperm(nn, generator=self.generator)
+        return iter(inds[perm_inds].flatten().tolist())
+
+
+def build_sampler_with_dataset(dataset):
+    name_to_indices = dict([(t["im_name"], i) for i, t in enumerate(dataset.record)])
+    ref_names = [t["pair_im_name"] for t in dataset.record]
+    ref_indices = [name_to_indices[n] for n in ref_names]
+    return PairSampler(dataset, ref_inds=ref_indices)
 
 
 def collate(batch):
@@ -43,8 +76,7 @@ def save_config(args, filename):
 
 def train_one_epoch(
         model, data_loader: Iterable, optimizer: torch.optim.Optimizer,
-        device: torch.device, loss_weights: dict, feats_lut: ImageFeaturesLut,
-        epoch: int, max_norm: float = 0):
+        device: torch.device, loss_weights: dict, epoch: int, max_norm: float = 0):
     model.train()
     metric_logger = MetricLogger(delimiter="  ")
     header = 'Epoch: [{}]'.format(epoch)
@@ -58,7 +90,7 @@ def train_one_epoch(
     for _ in metric_logger.log_every(range(len(data_loader)), print_freq, header):
         images, targets = next(loader)
         images, targets = ship_to_cuda(images, targets, device)
-        outputs, loss_dict = model(images, targets, feats_lut)
+        outputs, loss_dict = model(images, targets)
         losses = sum([loss_dict[k] * tloss_weights[k] for k in loss_dict.keys() if k in tloss_weights])
 
         optimizer.zero_grad()
@@ -71,7 +103,6 @@ def train_one_epoch(
 
         metric_logger.update(**loss_dict)
         metric_logger.update(loss=sum(list(loss_dict.values())).item())
-        metric_logger.update(total_loss=losses.item())
         metric_logger.update(grad_norm=grad_total_norm)
         torch.cuda.empty_cache()
     print("Averaged stats:", metric_logger)
@@ -81,12 +112,13 @@ def train_one_epoch(
 def main(args):
     device = torch.device(args.device)
     torch.random.manual_seed(args.seed)
+    torch.cuda.manual_seed(args.seed)
     np.random.seed(args.seed)
     random.seed(args.seed)
 
     # build for dataset
     dataset = build_trainset(args.train.dataset, args.train.data_root)
-    sampler = RandomSampler(dataset)
+    sampler = build_sampler_with_dataset(dataset)
     batch_sampler = BatchSampler(sampler, batch_size=args.train.batch_size, drop_last=True)
     dataloader = DataLoader(
         dataset,
@@ -95,21 +127,13 @@ def main(args):
         pin_memory=True,
         collate_fn=collate,  # not enable collate here.
     )
-    feats_lut = ImageFeaturesLut(dataset)
 
     # build model
     model = build_graph_models(args)
     model.to(device)
 
     # build optimizer
-    groups = []
-    for name, param in model.named_parameters():
-        if "graph_head" not in name:
-            param.requires_grad_(False)
-            continue
-        groups.append(param)
-    params = [{'params': groups}]
-    optimizer = optim.AdamW(params, lr=args.train.lr, weight_decay=args.train.weight_decay)
+    optimizer = optim.AdamW(model.parameters(), lr=args.train.lr, weight_decay=args.train.weight_decay)
     lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, args.train.lr_drop_epochs)
 
     # load previous trained model
@@ -123,6 +147,7 @@ def main(args):
             print(f"Unexpected keys: {unexpected}")
         if len(missed) > 0:
             print(f"Missed keys: {missed}")
+
         # overwrite optimizer
         if "optimizer" in params and "lr_scheduler" in params and "epoch" in params:
             optimizer.load_state_dict(params["optimizer"])
@@ -140,12 +165,12 @@ def main(args):
     for epoch in range(start_epoch, args.train.epochs + 1):
         train_stats = train_one_epoch(
             model, dataloader, optimizer, device,
-            loss_weights, feats_lut, epoch, args.train.clip_max_norm)
+            loss_weights, epoch, args.train.clip_max_norm)
         lr_scheduler.step()
         if args.train.output_dir:
             checkpoint_paths = [output_dir / 'checkpoint.pth']
             # extra checkpoint before LR drop and every 5 epochs
-            if (epoch + 1) % 5 == 0:
+            if epoch % 5 == 0:
                 checkpoint_paths.append(output_dir / f'checkpoint{epoch:04}.pth')
             for checkpoint_path in checkpoint_paths:
                 utils.save_on_master({
@@ -153,7 +178,6 @@ def main(args):
                     'optimizer': optimizer.state_dict(),
                     'lr_scheduler': lr_scheduler.state_dict(),
                     'epoch': epoch,
-                    "feats_lut": feats_lut,
                 }, checkpoint_path)
 
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()}, 'epoch': epoch}
@@ -164,31 +188,6 @@ def main(args):
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
-
-
-def modify_config_for_freeze_training(args):
-    print("Freeze training mode.")
-
-    args.defrost()
-    # freeze training loss
-    args.train.loss_weights.loss_classifier = 0.0
-    args.train.loss_weights.loss_box_reg = 0.0
-    args.train.loss_weights.loss_oim = 0.0
-    args.train.loss_weights.loss_objectness = 0.0
-    args.train.loss_weights.loss_rpn_box_reg = 0.0
-
-    # check all the norm_layer settings in model args
-    # HACK settings
-    if args.model.backbone.norm_layer != "frozen_bn":
-        args.model.backbone.norm_layer = "frozen_bn"
-        print("Setting backbone norm_layer to FrozenBN")
-    if args.model.reid_head.norm_layer != "frozen_bn":
-        args.model.reid_head.norm_layer = "frozen_bn"
-        print("Setting reid_head norm_layer to FrozenBN")
-
-    # freeze the backbone
-    args.freeze()
-    return args
 
 
 def get_configs():
@@ -217,5 +216,4 @@ def get_configs():
 
 if __name__ == '__main__':
     args = get_configs()
-    args = modify_config_for_freeze_training(args)
     main(args)

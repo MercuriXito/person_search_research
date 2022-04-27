@@ -19,7 +19,24 @@ from datasets import build_trainset
 import utils.misc as utils
 from utils.logger import MetricLogger
 from utils.misc import ship_to_cuda, yaml_dump
-from models.trainer import collate, save_config
+
+
+def collate(batch):
+    return list(zip(*batch))
+
+
+def save_config(args, filename):
+    from yacs.config import CfgNode
+    from easydict import EasyDict
+    if isinstance(args, CfgNode):
+        with open(filename, "w") as f:
+            f.write(args.dump())
+    elif isinstance(args, EasyDict):
+        # TODO: add support for easydict
+        raise Exception("not used for EasyDict")
+    else:
+        # dict
+        yaml_dump(args, filename)
 
 
 # WarmuplrScheduler

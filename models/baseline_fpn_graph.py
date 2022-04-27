@@ -1,21 +1,22 @@
 import torch
 import torch.nn.functional as F
-from copy import deepcopy
 
 from torchvision.models.detection.transform import GeneralizedRCNNTransform
-from torchvision.models.detection.rpn import AnchorGenerator, RegionProposalNetwork, RPNHead
+from torchvision.models.detection.rpn import AnchorGenerator, \
+    RegionProposalNetwork, RPNHead
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.ops import MultiScaleRoIAlign
 
 from models.losses import OIMLoss
 from models.reid_head import ReIDEmbeddingHead
-from models.backbone import build_faster_rcnn_based_backbone
-from models.baseline import BaseNet, PSRoIHead
-from models.ctx_attn_head import ImageFeaturesLut, build_criterion_for_graph_head, build_graph_head
+from models.backbone import build_faster_rcnn_based_multi_scale_backbone
+from models.baseline import PSRoIHead
+from models.baseline_fpn import BaseFPNNet
+from models.ctx_attn_head import build_criterion_for_graph_head, build_graph_head
 
 
-class GraphNet(BaseNet):
-    def __init__(self, backbone, rpn, roi_head, transform, graph_head):
+class GraphFPNNet(BaseFPNNet):
+    def __init__(self, backbone, rpn, roi_head, transform, graph_head=None):
         super().__init__(backbone, rpn, roi_head, transform)
         self.graph_head = graph_head
 
@@ -27,8 +28,6 @@ class GraphNet(BaseNet):
         """
         if self.training and targets is None:
             raise ValueError("In training mode, targets should be passed")
-        # if self.training and feats_lut is None:
-        #     raise ValueError("GraphNet require feats_lut in training.")
 
         original_image_sizes = []
         for img in images:
@@ -38,17 +37,15 @@ class GraphNet(BaseNet):
 
         images, targets = self.transform(images, targets)
         features_dict = self.backbone(images.tensors)
-        rpn_features = {"feat_res4": features_dict["feat_res4"]}
-        proposals, proposal_losses = self.rpn(images, rpn_features, targets)
-        roi_features = {"feat_res4": features_dict["feat_res4"]}
+        proposals, proposal_losses = self.rpn(images, features_dict, targets)
         detections, detector_losses = self.roi_heads(
-            roi_features, proposals, images.image_sizes, targets)
+            features_dict, proposals, images.image_sizes, targets)
 
-        # additional branch for graph head
         if self.training:
             graph_outs, graph_losses = self.graph_head(detections, targets, feats_lut)
         else:
             graph_losses = {}
+
         detections = self.transform.postprocess(
             detections, images.image_sizes, original_image_sizes)
 
@@ -60,8 +57,7 @@ class GraphNet(BaseNet):
         return detections, losses
 
 
-def build_graph_net(args):
-
+def build_fpn_graph(args):
     min_size = 800
     max_size = 1333
 
@@ -93,13 +89,21 @@ def build_graph_net(args):
     box_score_thresh = args.model.roi_head.score_thresh_test
     box_nms_thresh = args.model.roi_head.nms_thresh_test
     box_detections_per_img = args.model.roi_head.detections_per_image_test
+    roi_use_ksampling = args.model.roi_head.k_sampling
+    roi_use_k = args.model.roi_head.k
 
     # model parameters
     use_multi_scale = args.model.use_multi_scale
     reid_feature_dim = args.model.reid_feature_dim
 
     # build backbone
-    backbone, box_head = build_faster_rcnn_based_backbone(
+    # backbone, box_head = build_faster_rcnn_based_backbone(
+    #         args.model.backbone.name,
+    #         args.model.backbone.pretrained,
+    #         args.model.backbone.norm_layer,
+    #         return_res4=use_multi_scale)
+
+    backbone, box_head = build_faster_rcnn_based_multi_scale_backbone(
             args.model.backbone.name,
             args.model.backbone.pretrained,
             args.model.backbone.norm_layer,
@@ -125,11 +129,11 @@ def build_graph_net(args):
 
     # build roi_heads
     box_roi_pool = MultiScaleRoIAlign(
-        featmap_names=['feat_res3', 'feat_res4'],
-        output_size=14,
+        featmap_names=['feat_res2', 'feat_res3', 'feat_res4', 'feat_res5'],
+        output_size=7,
         sampling_ratio=2)
 
-    representation_size = 2048  # for feat_res4 outputs
+    representation_size = box_head.out_channels[-1]
     num_classes = 2
     box_predictor = FastRCNNPredictor(representation_size, num_classes)
 
@@ -142,18 +146,16 @@ def build_graph_net(args):
     oim_loss = OIMLoss(num_features, num_pids, num_cq_size, oim_momentum, oim_scalar)
 
     # build reid head
-    reid_head_norm_layer = args.model.reid_head.norm_layer
+    representation_size = 1024
     if use_multi_scale:
         reid_head = ReIDEmbeddingHead(
             featmap_names=["feat_res4", "feat_res5"],
-            in_channels=[1024, 2048],
-            dim=reid_feature_dim, feature_norm=True,
-            norm_layer=reid_head_norm_layer)
+            in_channels=[256, representation_size],
+            dim=reid_feature_dim, feature_norm=True)
     else:
         reid_head = ReIDEmbeddingHead(
-            featmap_names=['feat_res5'], in_channels=[2048],
-            dim=reid_feature_dim, feature_norm=True,
-            norm_layer=reid_head_norm_layer)
+            featmap_names=['feat_res5'], in_channels=[256],
+            dim=reid_feature_dim, feature_norm=True)
 
     roi_head = PSRoIHead(
         box_roi_pool, box_head, box_predictor,
@@ -164,6 +166,9 @@ def build_graph_net(args):
         batch_size_per_image=box_batch_size_per_image,
         positive_fraction=box_positive_fraction,
         bbox_reg_weights=bbox_reg_weights,
+        # Sampling parameters,
+        k_sampling=roi_use_ksampling,
+        k=roi_use_k,
         # RoIHead inference parameters
         score_thresh=box_score_thresh,
         nms_thresh=box_nms_thresh,
@@ -172,8 +177,7 @@ def build_graph_net(args):
         graph_head=None
     )
 
-    # build graph head
-    # graph_loss = deepcopy(oim_loss)
+    # graph module
     graph_loss = build_criterion_for_graph_head(args.model.graph_head.loss)
     graph_stack = args.model.graph_head.num_graph_stack
     graph_nheads = args.model.graph_head.nheads
@@ -189,68 +193,42 @@ def build_graph_net(args):
         dropout=graph_dropout
     )
 
-    model = GraphNet(backbone, rpn, roi_head, transform, graph_head)
+    model = GraphFPNNet(backbone, rpn, roi_head, transform, graph_head=graph_head)
     return model
 
 
 if __name__ == '__main__':
-    from datasets.cuhk_sysu import CUHK_SYSU
-    import torchvision.transforms as T
-    from datasets.transforms import ToTensor
-    from configs.graph_net_default_configs import get_default_cfg
-    from easydict import EasyDict
-    from utils.misc import ship_to_cuda
+    # testing model
+    from torchvision.transforms import ToTensor
+    from configs.faster_rcnn_default_configs import get_default_cfg
     from datasets import build_trainset
-    from torch.utils.data import DataLoader
     from torch.utils.data.sampler import RandomSampler, BatchSampler
+    from torch.utils.data import DataLoader
+    from utils.misc import ship_to_cuda
+    from models.ctx_attn_head import ImageFeaturesLut
 
-    args = get_default_cfg()
-
+    # load dataset, build input
     root = "data/cuhk-sysu"
     transforms = ToTensor()
-
-    # dataset = CUHK_SYSU(root, transforms, "train")
     dataset = build_trainset("cuhk-sysu", root)
-
     lut = ImageFeaturesLut(dataset)
 
     sampler = RandomSampler(dataset)
     batch_sampler = BatchSampler(sampler, batch_size=4, drop_last=True)
     dataloader = DataLoader(dataset, batch_sampler=batch_sampler, num_workers=4, collate_fn=lambda x: x)
-
     image1, target1 = dataset[0]
     image2, target2 = dataset[1]
 
-    # image_mean = [0.485, 0.456, 0.406]
-    # image_std = [0.229, 0.224, 0.225]
-    # min_size = 1500
-    # max_size = 900
-    # transform = GeneralizedRCNNTransform(min_size, max_size, image_mean, image_std)
-
-    # images, targets = transform.forward([image1, image2], [target1, target2])
-
     device = "cuda"
-    # device = "cpu"
     device = torch.device(device)
     images = [image1, image2]
     targets = [target1, target2]
     images, targets = ship_to_cuda(images, targets, device)
 
-    # draw boxes
-    # from utils.vis import draw_boxes_text
-    # for i in range(len(images.tensors)):
-    #     img = images.tensors[i]
-    #     boxes = targets[i]["boxes"]
-    #     draw_boxes_text(img, boxes)
-
-    model = build_graph_net(args)
-    # model.load_state_dict(torch.load("exps/exps_cuhk.graph/checkpoint.pth", map_location="cpu")["model"])
+    # build
+    args = get_default_cfg()
+    model = build_fpn_graph(args)
     model.to(device)
-
-    # model.eval()
-
-    # with torch.no_grad():
-    #     outputs = model(images, targets)
 
     outputs = model(images, targets, lut)
 

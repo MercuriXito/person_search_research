@@ -1,0 +1,27 @@
+# RetinaNet baseline with the same reid head structure
+# with sampling method the same with RetinaNet
+# with new structure
+
+model:
+  name: retinanet
+  roi_head:
+    use_layer4: True
+    layer4_rep_size: 2048
+  graph_head:
+    loss:
+      name: "contrastive"
+      margin: 0.35
+  backbone:
+    norm_layer: "frozen_bn"
+  reid_head:
+    norm_layer: "frozen_bn"
+train:
+  output_dir: exps/exps_det_acae/exps_cuhk.retinanet.freeze
+  batch_size: 2
+  loss_weights:
+    loss_graph: 10.0
+  epochs: 10
+  lr_drop_epochs:
+    - 5
+  resume: exps/exps_det/exps_cuhk.retinanet.loss_weights.iter.new_head.large2048/pretrained.pth
+

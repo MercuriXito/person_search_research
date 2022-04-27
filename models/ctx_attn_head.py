@@ -181,6 +181,9 @@ class ContextGraphHead(nn.Module):
         """
         img_indices is required.
         """
+        if self.training and feats_lut is None:
+            return self.pair_forward(detections, targets)
+
         if self.training:
             assert feats_lut is not None
 
@@ -208,6 +211,29 @@ class ContextGraphHead(nn.Module):
         for bidx in range(bs):
             output = self.graph_head(
                 embeddings[bidx], pair_embeddings[bidx], labels[bidx], pair_labels[bidx])
+            if self.training:
+                scores, loss = output
+                outputs.append(scores)
+                losses.append(loss)
+            else:
+                outputs.append(output)
+        loss_graph = torch.stack([l["graph_loss"] for l in losses])
+        loss_graph = loss_graph.mean()
+        losses = dict(loss_graph=loss_graph)
+        return outputs, losses
+
+    def pair_forward(self, detections, targets):
+        embeddings, labels = [],  []
+        for item in detections:
+            embeddings.append(item["embeddings"])
+            labels.append(item["pid_labels"])
+        embeddings, labels = self.preprocess(embeddings, labels)
+        bs = len(embeddings)
+        outputs, losses = [], []
+        for bidx in range(0, bs, 2):
+            output = self.graph_head(
+                embeddings[bidx], embeddings[bidx+1],
+                labels[bidx], labels[bidx+1])
             if self.training:
                 scores, loss = output
                 outputs.append(scores)

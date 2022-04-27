@@ -1,0 +1,24 @@
+# cuhk with fcos based model
+# using the same loss weights suggested in original paper.
+# amplifying the weights of losses related to det
+# using warmup training strategy in `iter_trainer`
+
+model:
+  name: fcos
+  graph_head:
+    loss:
+      name: "contrastive"
+      margin: 0.35
+train:
+  output_dir: exps/exps_det_acae/exps_cuhk.fcos.lw1
+  batch_size: 2
+  loss_weights:
+    loss_oim: 1.0
+    loss_classifier: 5.0
+    loss_box_reg: 5.0
+    loss_objectness: 0.0
+    loss_rpn_box_reg: 0.0
+    loss_centerness: 1.0
+    loss_graph: 1.0
+  epochs: 20
+

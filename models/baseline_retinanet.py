@@ -50,13 +50,14 @@ class PSRoIHead(nn.Module):
                 image_shapes,
                 targets=None,
                 matched_idxs=None,
+                return_sampled_inds=False,
                 *args, **kwargs):
 
         if self.training:
             assert matched_idxs is not None
             features_shape = [list(feats.shape) for feats in features.values()]
             # feats_level_inds is required if using level_roi_pooling.
-            proposals, labels, pid_labels, feats_level_inds = \
+            proposals, labels, pid_labels, feats_level_inds, sampled_inds = \
                 self.select_training_samples(proposals, targets, features_shape, matched_idxs)
 
         num_imgs = len(proposals)
@@ -67,19 +68,25 @@ class PSRoIHead(nn.Module):
 
         results = []
         losses = {}
+
+        num_persons_per_images = [len(proposal) for proposal in proposals]
+        embedding_list = embeddings.split(num_persons_per_images)
+        norms_list = norms.split(num_persons_per_images)
+        results = []
+        for idx in range(num_imgs):
+            results.append({
+                "embeddings": embedding_list[idx],
+                "norm": norms_list[idx]
+            })
+
         if self.training:
             loss_oim = self.oim_loss(embeddings, pid_labels)
             losses = {"loss_oim": loss_oim}
-        else:
-            num_persons_per_images = [len(proposal) for proposal in proposals]
-            embedding_list = embeddings.split(num_persons_per_images)
-            norms_list = norms.split(num_persons_per_images)
-            results = []
-            for idx in range(num_imgs):
-                results.append({
-                    "embeddings": embedding_list[idx],
-                    "norm": norms_list[idx]
-                })
+            for i in range(num_imgs):
+                results[i]["pid_labels"] = pid_labels[i]
+                if return_sampled_inds:
+                    results[i]["sampled_inds"] = sampled_inds[i]
+
         return results, losses
 
     def level_roi_pooling(self, features, proposals, feats_level_inds):
@@ -209,7 +216,7 @@ class PSRoIHead(nn.Module):
         # pid_labels = self.add_gt_pid_labels(pid_labels, targets)
         # feats_level = self.add_gt_feats_level(feats_level, targets)
 
-        return boxes, labels, pid_labels, feats_level
+        return boxes, labels, pid_labels, feats_level, sampled_inds
 
     def select_training_samples_test(
             self, proposals, targets, features_shape, matched_idxs):
