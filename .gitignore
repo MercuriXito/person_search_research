@@ -4,6 +4,7 @@ data
 __pycache__
 test*.py
 test/*
+tester
 exps
 !exps/README.md
 !bin/exps/

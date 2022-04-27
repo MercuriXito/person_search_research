@@ -1,6 +1,7 @@
 import pickle as pkl
 import json
 import os
+import random
 from prettytable import PrettyTable
 import numpy as np
 import torch
@@ -11,6 +12,13 @@ try:
     from yaml import CLoader as Loader, CDumper as Dumper
 except ImportError:
     from yaml import Loader, Dumper
+
+
+def _fix_randomness(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
 
 
 # ==================================
@@ -202,4 +210,3 @@ def compare(outs_a, outs_b, prefix=None):
         print("Exception occur in :{}".format(".".join(prefix)))
         raise(ex)
     return res
-

@@ -2,7 +2,6 @@
 - attention scores in cross-attention module
 - heatmap of features with Grad-CAM
 """
-from genericpath import exists
 import os
 import cv2
 import argparse
@@ -20,7 +19,7 @@ from evaluation.eval_graph import build_and_load_from_dir
 from datasets import load_eval_datasets
 from models.graph_net import GraphNet
 from utils.misc import ship_to_cuda
-from utils.vis import draw_boxes_text, get_random_colors
+from utils.vis import get_random_colors
 
 
 NORMAL_COLOR = (0, 0, 0)

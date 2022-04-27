@@ -275,10 +275,10 @@ class PickleVisualizer:
                 mlabel = int(qm_labels[i])
                 if i == target_qind:
                     color = self.query_color
-                    thickness = 2
+                    thickness = 4
                 else:
                     color = get_random_colors(mlabel)
-                    thickness = 1
+                    thickness = 2
                 cv2.rectangle(dimg, (x1, y1), (x2, y2), color, thickness=thickness)
             save_img_name = f"query_{qim_name}"
             save_img_name = os.path.join(save_img_root, save_img_name)
@@ -292,10 +292,10 @@ class PickleVisualizer:
                 mlabel = int(gm_labels[i])
                 if i == target_gind:
                     color = self.gallery_match_color if matched_flag else self.gallery_miss_color
-                    thickness = 2
+                    thickness = 4
                 else:
                     color = get_random_colors(mlabel)
-                    thickness = 1
+                    thickness = 2
                 cv2.rectangle(dimg, (x1, y1), (x2, y2), color, thickness=thickness)
             save_img_name = f"gallery_{gim_name}"
             save_img_name = os.path.join(save_img_root, save_img_name)
@@ -350,8 +350,13 @@ class PickleVisualizer:
 
 
 def test():
-    baseline_pkl_path = "exps/exps_cuhk/checkpoint.pth.eval.pkl"
-    cmm_pkl_path = "exps/exps_cuhk/checkpoint.pth.ctx.G0.4.eval.pkl"
+    # CUHK-SYSU
+    # baseline_pkl_path = "exps/exps_cuhk/checkpoint.pth.eval.pkl"
+    # cmm_pkl_path = "exps/exps_cuhk/checkpoint.pth.ctx.G0.4.eval.pkl"
+
+    baseline_pkl_path = "exps/exps_prw.oim/checkpoint.pth.eval.pkl"
+    cmm_pkl_path = "exps/exps_prw.oim/checkpoint.pth.ctx.G0.4.eval.pkl"
+
     differ = PickleResDiffer(cmm_pkl_path, baseline_pkl_path)
     criterion = Top1BetterCriterion()
 
@@ -376,8 +381,11 @@ def test_acae():
     print(start_inds)
 
     from evaluation.vis_acae import CTXFeatureMapVisualizer, CTXAttnWeightsVisualizer
-    baseline_pkl_path = "exps/exps_cuhk/checkpoint.pth.eval.pkl"
-    acae_pkl_path = "exps/exps_acae/exps_cuhk.closs_35/checkpoint.pth.acae.G0.4.eval.validate.pkl"
+    # baseline_pkl_path = "exps/exps_cuhk/checkpoint.pth.eval.pkl"
+    # acae_pkl_path = "exps/exps_acae/exps_cuhk.closs_35/checkpoint.pth.acae.G0.4.eval.validate.pkl"
+
+    baseline_pkl_path = "exps/exps_prw.oim/checkpoint.pth.eval.pkl"
+    acae_pkl_path = "exps/exps_acae/exps_prw.closs_60/checkpoint.pth.acae.G0.4.eval.pkl"
 
     differ = PickleResDiffer(acae_pkl_path, baseline_pkl_path)
     criterion = Top1BetterCriterion()
@@ -396,10 +404,12 @@ def test_acae():
         print(idx)
         visualizer.vis_feature_map([qind], [gind], [qbox], [gbox])
 
+    # # -------------- visualize ctx attn weights --------------------
+    # qinds, qboxes, ginds, gboxes = zip(*target_indices)
     # visualizer = CTXAttnWeightsVisualizer(os.path.dirname(acae_pkl_path))
     # visualizer.draw_attn_weights(qinds, ginds, qboxes, gboxes)
 
-    # visualize results in baseline
+    # # visualize results in baseline
     # qinds, qboxes, ginds, gboxes = zip(*comp_indices)
     # visualizer = PickleVisualizer(baseline_pkl_path, pkl=differ.comp_pickle)
     # visualizer.visualize_search(qinds, ginds, qboxes, gboxes, False)
@@ -407,3 +417,4 @@ def test_acae():
 
 if __name__ == '__main__':
     test_acae()
+    # test()
