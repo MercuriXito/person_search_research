@@ -10,6 +10,7 @@ exps
 !bin/exps/
 outputs
 doc
+gui_test
 
 # scripts
 show_res_tables.py
