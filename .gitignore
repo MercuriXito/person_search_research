@@ -3,6 +3,7 @@
 data
 __pycache__
 test*.py
+*.pyc
 test/*
 tester
 exps

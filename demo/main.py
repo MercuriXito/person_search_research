@@ -15,6 +15,11 @@ from demo.widgets import BoxSelectImageCanvas, ImageCanvas, \
 from demo.search_tools import search
 
 
+# predefined supported options
+supported_gallery = ["CUHK-SYSU", "PRW"]
+supported_methods = ["baseline", "cmm", "acae"]
+
+
 def read_config(config_path):
     from yaml import load
     try:
@@ -154,21 +159,19 @@ class QueryPanel(Frame):
         self.gallery_selector_label = Label(
             self.search_area_opt_lists,
             text="Gallery:")
-        available_gallery = ["CUHK-SYSU", "PRW"]
         self.gallery_selector_label.grid(row=0, column=0)
         self.gallery_selector = ttk.Combobox(self.search_area_opt_lists)
         self.gallery_selector.config(
-            values=available_gallery,
+            values=supported_gallery,
             exportselection=0)
         self.gallery_selector.current(0)
         self.gallery_selector.grid(row=0, column=1)
 
         self.methods_label = Label(self.search_area_opt_lists, text="Methods:")
         self.methods_label.grid(row=1, column=0)
-        available_methods = ["baseline", "refinement"]
         self.methods_selector = ttk.Combobox(self.search_area_opt_lists)
         self.methods_selector.config(
-            values=available_methods,
+            values=supported_methods,
             exportselection=0)
         self.methods_selector.current(0)
         self.methods_selector.grid(row=1, column=1)
