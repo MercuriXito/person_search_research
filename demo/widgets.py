@@ -408,18 +408,23 @@ class BoxFixSizedImageCanvas(FixSizedImageCanvas):
         def _show(event):
             if self.image is None:
                 return
-            top_level = tk.Toplevel()
-            top_level.title("Complete Image")
-            c_canvas = ImageCanvas(top_level)
-            # show the image with target person annotated.
+            # image with box
             box_image = self.image.copy()
             x1, y1, x2, y2 = [int(x) for x in self.box]
             box_image = cv2.rectangle(
                 box_image, (x1, y1), (x2, y2),
                 color=CV2_COLOR_BLUE, thickness=2)
+            h, w = box_image.shape[:2]
+
+            from demo.image_viewer import ScreenFitImageCanvas
+            top_level = tk.Toplevel(background="black")
+            top_level.geometry("{}x{}".format(w, h))
+            top_level.title("Complete Image: 100.00%")
+            c_canvas = ScreenFitImageCanvas(top_level)
             c_canvas.set_image_from_ndarray(box_image)
+            c_canvas.register_window_event_handler(top_level)
             c_canvas.show_images()
-            c_canvas.pack()
+            c_canvas.pack(anchor="center")
 
         self.bind("<Button-1>", _show)
 

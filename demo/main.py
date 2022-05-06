@@ -4,13 +4,12 @@ import os
 import tkinter as tk
 from tkinter import ttk
 import numpy as np
-from easydict import EasyDict
 
 from tkinter import Text, Button, Frame, Label
 import tkinter.filedialog as tkfiledialog
 import tkinter.font as tkfont
 
-from demo.widgets import BoxSelectImageCanvas, ImageCanvas, \
+from demo.widgets import BoxSelectImageCanvas, \
     BoxFixSizedImageCanvas, _box_area
 from demo.search_tools import search
 
@@ -18,23 +17,21 @@ from demo.search_tools import search
 # predefined supported options
 supported_gallery = ["CUHK-SYSU", "PRW"]
 supported_methods = ["baseline", "cmm", "acae"]
-
-
-def read_config(config_path):
-    from yaml import load
-    try:
-        from yaml import CLoader as Loader
-    except ImportError:
-        from yaml import Loader
-    with open(config_path, "r") as f:
-        data = load(f, Loader=Loader)
-    data = EasyDict(data)
-    return data
+image_extentions = ["jpg", "jpeg", "png", "bmp"]
 
 
 # utils functions
 def get_font_size():
     return tkfont.Font(font="TkDefaultFont").configure()["size"]
+
+
+def is_supported_image(path):
+    if not os.path.isfile(path):
+        return False
+    ext = ".".split(path)[-1]
+    if ext in image_extentions:
+        return True
+    return False
 
 
 class MainFrame(ttk.Frame):
@@ -61,6 +58,9 @@ class MainFrame(ttk.Frame):
             gallery = self.query_frame.gallery_selector.get()
             print(method, gallery)
             images, boxes = self.query_frame.query_box.get_values()
+            if images is None:
+                print("Image is None, aborted.")
+                return
             request_search_args = {
                 "method": method,
                 "gallery": gallery,
@@ -186,11 +186,18 @@ class QueryPanel(Frame):
         # open files.
         def select_images():
             filepath = tkfiledialog.askopenfilename(
-                filetypes=[("Images", "*.png *.jpg *.jpeg")]
+                filetypes=[
+                    (
+                        "Images",
+                        " ".join(["*.{}".format(x) for x in image_extentions])
+                    )
+                ]
             )
             self.query_file_show.delete('0.0', tk.END)
             self.query_file_show.insert('0.0', filepath)
-            if not os.path.exists(filepath):
+            if len(filepath) == 0 or not os.path.exists(filepath) or \
+                    not is_supported_image(filepath):
+                print("Invalid filepath {}".format(filepath))
                 return
             self.query_box.set_image_from_path(filepath)
             self.query_box.show_images()
@@ -258,43 +265,11 @@ class SearchResPanel(Frame):
 def draw_main_framework():
     root = tk.Tk()
     frame = MainFrame(root, padding=0)
-
     # search options area.
     frame.pack()
-    root.mainloop()
-
-
-def image_viewer():
-    """ Create a GUI program for showing target image.
-    """
-    import sys
-    args = sys.argv
-    if len(args) > 1:
-        test_img_path = args[1]
-    else:
-        test_img_path = os.path.join("..", "exps/vis/test.png")
-    root = tk.Tk()
-    frame = MainFrame(root, padding=10)
-    canvas = ImageCanvas(frame)
-    # canvas = FixSizedImageCanvas(frame, 128 * 2, 256 * 2)
-    test_images = np.random.randint(0, 255, size=(1024, 1024, 3), dtype=np.uint8)
-    # canvas.set_image_from_ndarray(test_images)
-    canvas.set_image_from_path(test_img_path)
-    canvas.show_images()
-
-    canvas.pack()
-    frame.pack()
-    root.mainloop()
-
-
-def show_dialog():
-    root = tk.Tk()
-    a = tkfiledialog.askopenfilename(filetypes=[('All files', '*')])
-    print(a)
+    root.resizable(0, 0)
     root.mainloop()
 
 
 if __name__ == '__main__':
-    # image_viewer()
     draw_main_framework()
-    # show_dialog()

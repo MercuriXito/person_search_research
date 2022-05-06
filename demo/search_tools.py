@@ -10,7 +10,7 @@ from evaluation.eval_defaults import build_and_load_from_dir
 from evaluation.eval import FasterRCNNExtractor, evaluate, \
     GTFeatureExtractor
 from utils.misc import ship_to_cuda, unpickle
-from evaluation.evaluator import GraphPSEvaluator, PersonSearchEvaluator, get_context_sim
+from evaluation.evaluator import GraphPSEvaluator, PersonSearchEvaluator
 from tqdm import tqdm
 
 
