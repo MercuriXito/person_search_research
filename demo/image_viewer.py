@@ -450,7 +450,7 @@ class ScreenFitImageCanvas(ImageCanvas):
 
             self._moved_actual_dx = ax
             self._moved_actual_dy = ay
-            print(self._moved_actual_dx, self._move_start_y)
+            # print(self._moved_actual_dx, self._move_start_y)
             self._change_show(event)
 
         self.bind("<ButtonPress-1>", _on_press_down)
@@ -466,44 +466,43 @@ class ScreenFitImageCanvas(ImageCanvas):
         move_y = self._moved_actual_dy
         iw, ih = self.get_img_width(), self.get_img_height()
 
-        # constrain move here to comply
-        # with change of scale ratio
-        # 不是单独 constrain move 的范围，而是整体 box 的范围（保证 scale 也一样）。
+        # constrain move here
         desired_image_box = [
-            - iw * r / 2 + move_x * r,
-            - ih * r / 2 + move_y * r,
-            iw * r / 2 + move_x * r,
-            ih * r / 2 + move_y * r,
+            - iw * r / 2 + move_x * r, - ih * r / 2 + move_y * r,
+            iw * r / 2 + move_x * r, ih * r / 2 + move_y * r,
         ]
-        area_box = [
-            -self.wwidth/2, -self.wheight/2, self.wwidth/2, self.wheight/2
-        ]
+        area_box = [-self.wwidth/2, -self.wheight/2, self.wwidth/2, self.wheight/2]
         clip_box = list(inter_box(desired_image_box, area_box))
-        image_box = deepcopy(desired_image_box)
         # rectified box
-        if ih * r >= self.wheight:
+        if ih * r > self.wheight:
             if clip_box[3] < area_box[3]:
                 my = abs(clip_box[3] - area_box[3])
-                image_box[1] += my
-                image_box[3] += my
-                self._moved_actual_dy += my / r
+                move_y += my / r
             if clip_box[1] > area_box[1]:
                 my = abs(clip_box[1] - area_box[1])
-                image_box[1] -= my
-                image_box[3] -= my
-                self._moved_actual_dy -= my / r
-        if iw * r >= self.wwidth:
+                move_y -= my / r
+        else:
+            move_y = 0
+            self._moved_actual_dy = 0
+        if iw * r > self.wwidth:
             if clip_box[2] < area_box[2]:
                 mx = abs(clip_box[2] - area_box[2])
-                image_box[0] += mx
-                image_box[2] += mx
-                self._moved_actual_dx += mx / r
+                move_x += mx / r
             if clip_box[0] > area_box[0]:
                 mx = abs(clip_box[0] - area_box[0])
-                image_box[0] -= mx
-                image_box[2] -= mx
-                self._moved_actual_dx -= mx / r
+                move_x -= mx / r
+        else:
+            move_x = 0
+            self._moved_actual_dx = 0
 
+        # self._moved_actual_dx = move_x
+        # self._moved_actual_dy = move_y
+
+        image_box = [
+            - iw * r / 2 + move_x * r, - ih * r / 2 + move_y * r,
+            iw * r / 2 + move_x * r, ih * r / 2 + move_y * r,
+        ]
+        area_box = [-self.wwidth/2, -self.wheight/2, self.wwidth/2, self.wheight/2]
         clip_box = list(inter_box(image_box, area_box))
         clip_width = clip_box[2] - clip_box[0]
         clip_height = clip_box[3] - clip_box[1]
@@ -563,10 +562,12 @@ class ResizeHandler:
         if self._top_level_height < event.height or \
                 self._top_level_width < event.width:
             # window expand event.
-            print("Emmit window expand events.")
+            self.toplevel.event_generate("<<WindowExpandEvent>>")
+            # print("Emmit window expand events.")
         if self._top_level_height > event.height or \
                 self._top_level_width > event.width:
-            print("Emmit window shrink events.")
+            self.toplevel.event_generate("<<WindowShrinkEvent>>")
+            # print("Emmit window shrink events.")
 
         self._top_level_height = event.height
         self._top_level_width = event.width
@@ -616,6 +617,11 @@ def main():
     canvas.pack_propagate(False)
     canvas.register_window_event_handler(root)
     root.configure(background="black")
+    w, h = canvas.get_img_width(), canvas.get_img_height()
+    min_ratio = 0.3
+    root.minsize(
+        width=int(w*min_ratio),
+        height=int(h*min_ratio))
     root.mainloop()
 
 

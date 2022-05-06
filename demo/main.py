@@ -28,7 +28,7 @@ def get_font_size():
 def is_supported_image(path):
     if not os.path.isfile(path):
         return False
-    ext = ".".split(path)[-1]
+    ext = path.split(".")[-1]
     if ext in image_extentions:
         return True
     return False

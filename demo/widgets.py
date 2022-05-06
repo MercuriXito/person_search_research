@@ -418,6 +418,10 @@ class BoxFixSizedImageCanvas(FixSizedImageCanvas):
 
             from demo.image_viewer import ScreenFitImageCanvas
             top_level = tk.Toplevel(background="black")
+            min_ratio = 0.3
+            top_level.minsize(
+                width=int(w*min_ratio),
+                height=int(h*min_ratio))
             top_level.geometry("{}x{}".format(w, h))
             top_level.title("Complete Image: 100.00%")
             c_canvas = ScreenFitImageCanvas(top_level)
