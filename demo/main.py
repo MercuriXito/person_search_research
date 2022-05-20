@@ -6,6 +6,7 @@ from tkinter import ttk
 import numpy as np
 
 from tkinter import Text, Button, Frame, Label
+from tkinter.messagebox import showinfo
 import tkinter.filedialog as tkfiledialog
 import tkinter.font as tkfont
 
@@ -70,6 +71,9 @@ class MainFrame(ttk.Frame):
             # TODO: post to search.
             search_results = search(**request_search_args)
             self.search_frame.set_top10_result(search_results)
+            showinfo(
+                title="search info",
+                message=f"Search {method} on {gallery} completed.")
 
         self.query_frame.search_button.config(command=go_search)
 
@@ -160,7 +164,8 @@ class QueryPanel(Frame):
             self.search_area_opt_lists,
             text="Gallery:")
         self.gallery_selector_label.grid(row=0, column=0)
-        self.gallery_selector = ttk.Combobox(self.search_area_opt_lists)
+        self.gallery_selector = ttk.Combobox(
+            self.search_area_opt_lists, state="readonly")
         self.gallery_selector.config(
             values=supported_gallery,
             exportselection=0)
@@ -169,7 +174,8 @@ class QueryPanel(Frame):
 
         self.methods_label = Label(self.search_area_opt_lists, text="Methods:")
         self.methods_label.grid(row=1, column=0)
-        self.methods_selector = ttk.Combobox(self.search_area_opt_lists)
+        self.methods_selector = ttk.Combobox(
+            self.search_area_opt_lists, state="readonly")
         self.methods_selector.config(
             values=supported_methods,
             exportselection=0)
