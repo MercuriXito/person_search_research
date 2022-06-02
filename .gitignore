@@ -9,11 +9,8 @@ tester
 exps
 !exps/README.md
 !bin/exps/
-outputs
-doc
 gui_test
+doc/*.md
 
 # scripts
-show_res_tables.py
 search.sh
-explorer_data.py
