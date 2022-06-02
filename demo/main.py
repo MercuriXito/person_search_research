@@ -248,13 +248,13 @@ class SearchResPanel(Frame):
 
     def _init_layout(self):
         # hold-on item
-        root_path = "/home/victorchen/workspace/Venus/Market-1501/query/"
-        images = os.listdir(root_path)[:11]
+        root_path = "demo/resources"
+        images = [f"Top-{i+1}.png" for i in range(10)]
 
         all_canvas = []
         for i in range(10):
             canvas = BoxFixSizedImageCanvas(self, self.pw, self.ph)
-            canvas.set_image_from_path(os.path.join(root_path, images[i+1]))
+            canvas.set_image_from_path(os.path.join(root_path, images[i]))
             canvas.show_images()
             canvas.grid(column=i%5, row=i//5, padx=0, pady=0, ipadx=0, ipady=0)
             all_canvas.append(canvas)
