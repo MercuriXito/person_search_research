@@ -18,7 +18,8 @@ def build_and_load_from_dir(exp_dir, dst_eval_file="", other_options=None):
     if other_options is None:
         other_options = []
 
-    # target eval config file?
+    # priority to choose evaluation file
+    # designated eval file -> eval.yml -> config.yml
     if len(dst_eval_file) > 0:
         eval_file = dst_eval_file
         assert os.path.exists(eval_file), f"{eval_file}"
