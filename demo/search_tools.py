@@ -7,8 +7,7 @@ import torchvision.ops as box_ops
 
 from datasets import load_eval_datasets
 from evaluation.eval_defaults import build_and_load_from_dir
-from evaluation.eval import FasterRCNNExtractor, evaluate, \
-    GTFeatureExtractor
+from evaluation.eval import FasterRCNNExtractor
 from utils.misc import ship_to_cuda, unpickle
 from evaluation.evaluator import GraphPSEvaluator, PersonSearchEvaluator
 from tqdm import tqdm
@@ -25,19 +24,19 @@ def choose_model_dataset(gallery, method):
             pkl_path = os.path.join(base_root, "exps/exps_cuhk/checkpoint.pth.eval.pkl")
         elif method == "cmm":
             exp_dir = os.path.join(base_root, "exps/exps_cuhk")
-            pkl_path = os.path.join(base_root, "exps/exps_cuhk/checkpoint.pth.ctx.G0.4.eval.pkl")
+            pkl_path = os.path.join(base_root, "exps/exps_cuhk/checkpoint.pth.cmm.G0.4.eval.pkl")
         elif method == "acae":
             exp_dir = os.path.join(base_root, "exps/exps_acae/exps_cuhk.closs_35")
-            pkl_path = os.path.join(base_root, "exps/exps_acae/exps_cuhk.closs_35/checkpoint.pth.acae.G0.4.validate.pkl")
+            pkl_path = os.path.join(base_root, "exps/exps_acae/exps_cuhk.closs_35/checkpoint.pth.acae.G0.4.pkl")
         else:
             raise NotImplementedError(f"{method}")
     elif gallery == "PRW":
         if method == "baseline":
-            exp_dir = os.path.join(base_root, "exps/exps_prw.oim")
-            pkl_path = os.path.join(base_root, "exps/exps_prw.oim/checkpoint.pth.eval.pkl")
+            exp_dir = os.path.join(base_root, "exps/exps_prw")
+            pkl_path = os.path.join(base_root, "exps/exps_prw/checkpoint.pth.eval.pkl")
         elif method == "cmm":
-            exp_dir = os.path.join(base_root, "exps/exps_prw.oim")
-            pkl_path = os.path.join(base_root, "exps/exps_prw.oim/checkpoint.pth.ctx.G0.4.eval.pkl")
+            exp_dir = os.path.join(base_root, "exps/exps_prw")
+            pkl_path = os.path.join(base_root, "exps/exps_prw/checkpoint.pth.cmm.G0.4.eval.pkl")
         elif method == "acae":
             exp_dir = os.path.join(base_root, "exps/exps_acae/exps_prw.closs_60")
             pkl_path = os.path.join(base_root, "exps/exps_acae/exps_prw.closs_60/checkpoint.pth.acae.G0.4.eval.pkl")

@@ -1,3 +1,0 @@
-train:
-  output_dir: exps/exps_cuhk.graph
-  batch_size: 2

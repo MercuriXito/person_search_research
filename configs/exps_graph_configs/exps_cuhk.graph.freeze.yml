@@ -1,5 +1,0 @@
-train:
-  output_dir: exps/exps_cuhk.graph.freeze
-  batch_size: 2
-  loss_weights:
-      loss_graph: 0.0

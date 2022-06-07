@@ -51,48 +51,32 @@
 # =============================================================
 # ACAE experiments: sensity of lambda
 # =============================================================
-# python -m experiments.exps_lambda --pickle exps/exps_acae/exps_cuhk.closs_35/checkpoint.pth.acae.G0.4.eval.validate.pkl
+# python -m experiments.exps_lambda --pickle exps/exps_acae/exps_cuhk.closs_35/checkpoint.pth.acae.G0.4.eval.pkl
 
 # =============================================================
 # ACAE experiments: options of different features
 # =============================================================
-# python -m experiments.exps_acae_ablation --pickle exps/exps_acae/exps_cuhk.closs_35/checkpoint.pth.acae.G0.4.eval.validate.pkl
+# python -m experiments.exps_acae_ablation --pickle exps/exps_acae/exps_cuhk.closs_35/checkpoint.pth.acae.G0.4.eval.pkl
 
 # =============================================================
 # ACAE experiments: gallery size effects.
 # =============================================================
-# python -m experiments.exps_gallery_size --pickle exps/exps_acae/exps_cuhk.closs_35/checkpoint.pth.acae.G0.4.eval.validate.pkl
+# python -m experiments.exps_gallery_size --pickle exps/exps_acae/exps_cuhk.closs_35/checkpoint.pth.acae.G0.4.eval.pkl
 
 # =============================================================
 # ACAE experiments: Topk Effects.
 # =============================================================
-# python -m experiments.exps_fast_graph --pickle exps/exps_acae/exps_cuhk.closs_35/checkpoint.pth.acae.G0.4.eval.validate.pkl
+# python -m experiments.exps_fast_graph --pickle exps/exps_acae/exps_cuhk.closs_35/checkpoint.pth.acae.G0.4.eval.pkl
 # python -m experiments.exps_fast_graph --pickle exps/exps_acae/exps_prw.closs_60/checkpoint.pth.acae.G0.4.eval.pkl
 
 # =============================================================
 # Inference Time Measurement.
 # =============================================================
-# python -m experiments.exps_speed --pickle exps/exps_acae/exps_cuhk.closs_35/checkpoint.pth.acae.G0.4.eval.validate.pkl
-# python -m experiments.exps_speed --pickle exps/exps_acae/exps_cuhk.closs_35/checkpoint.pth.acae.G0.4.eval.validate.pkl --mode feat
-# python -m experiments.exps_speed --pickle exps/exps_acae/exps_cuhk.closs_35/checkpoint.pth.acae.G0.4.eval.validate.pkl --mode baseline
-# python -m experiments.exps_speed --pickle exps/exps_acae/exps_cuhk.closs_35/checkpoint.pth.acae.G0.4.eval.validate.pkl --mode cmm
-# python -m experiments.exps_speed --pickle exps/exps_acae/exps_cuhk.closs_35/checkpoint.pth.acae.G0.4.eval.validate.pkl --mode acae
-
-# Inference time on other-ps model
-# python -m experiments.exps_speed --pickle exps/exps_det_acae/exps_cuhk.retinanet.freeze/checkpoint.pth.acae.G0.4.eval.pkl --mode feat
-# python -m experiments.exps_speed --pickle exps/exps_det_acae/exps_cuhk.retinanet.freeze/checkpoint.pth.acae.G0.4.eval.pkl --mode baseline
-# python -m experiments.exps_speed --pickle exps/exps_det_acae/exps_cuhk.retinanet.freeze/checkpoint.pth.acae.G0.4.eval.pkl --mode cmm
-# python -m experiments.exps_speed --pickle exps/exps_det_acae/exps_cuhk.retinanet.freeze/checkpoint.pth.acae.G0.4.eval.pkl --mode acae
-
-# python -m experiments.exps_speed --pickle exps/exps_det_acae/exps_cuhk.fcos.freeze/checkpoint.pth.acae.G0.4.eval.pkl --mode feat
-# python -m experiments.exps_speed --pickle exps/exps_det_acae/exps_cuhk.fcos.freeze/checkpoint.pth.acae.G0.4.eval.pkl --mode baseline
-# python -m experiments.exps_speed --pickle exps/exps_det_acae/exps_cuhk.fcos.freeze/checkpoint.pth.acae.G0.4.eval.pkl --mode cmm
-# python -m experiments.exps_speed --pickle exps/exps_det_acae/exps_cuhk.fcos.freeze/checkpoint.pth.acae.G0.4.eval.pkl --mode acae
-
-# python -m experiments.exps_speed --pickle exps/exps_det_acae/exps_cuhk.fpn.freeze/checkpoint.pth.acae.G0.4.eval.pkl --mode feat
-# python -m experiments.exps_speed --pickle exps/exps_det_acae/exps_cuhk.fpn.freeze/checkpoint.pth.acae.G0.4.eval.pkl --mode baseline
-# python -m experiments.exps_speed --pickle exps/exps_det_acae/exps_cuhk.fpn.freeze/checkpoint.pth.acae.G0.4.eval.pkl --mode cmm
-# python -m experiments.exps_speed --pickle exps/exps_det_acae/exps_cuhk.fpn.freeze/checkpoint.pth.acae.G0.4.eval.pkl --mode acae
+# python -m experiments.exps_speed --pickle exps/exps_acae/exps_cuhk.closs_35/checkpoint.pth.acae.G0.4.eval.pkl
+# python -m experiments.exps_speed --pickle exps/exps_acae/exps_cuhk.closs_35/checkpoint.pth.acae.G0.4.eval.pkl --mode feat
+# python -m experiments.exps_speed --pickle exps/exps_acae/exps_cuhk.closs_35/checkpoint.pth.acae.G0.4.eval.pkl --mode baseline
+# python -m experiments.exps_speed --pickle exps/exps_acae/exps_cuhk.closs_35/checkpoint.pth.acae.G0.4.eval.pkl --mode cmm
+# python -m experiments.exps_speed --pickle exps/exps_acae/exps_cuhk.closs_35/checkpoint.pth.acae.G0.4.eval.pkl --mode acae
 
 # =============================================================
 # Addition Inference Time Measurement.
@@ -101,7 +85,7 @@
 # ACAE
 # python -m evaluation.eval_graph \
 #     exps/exps_acae/exps_cuhk.closs_35 \
-#     eval.use_data exps/exps_acae/exps_cuhk.closs_35/checkpoint.pth.acae.G0.4.eval.validate.pkl
+#     eval.use_data exps/exps_acae/exps_cuhk.closs_35/checkpoint.pth.acae.G0.4.eval.pkl
 
 # # CMM
 # python -m evaluation.eval_defaults \

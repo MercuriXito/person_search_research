@@ -1,6 +1,6 @@
 train:
   # output_dir: exps/exps_prw
-  output_dir: exps/exps_prw.oim
+  output_dir: exps/exps_prw
   batch_size: 2
   dataset: prw
   data_root: "data/prw"

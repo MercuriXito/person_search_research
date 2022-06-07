@@ -184,7 +184,7 @@ def main(args):
 
 
 def get_configs():
-    from configs.graph_net_default_configs \
+    from configs.faster_rcnn_default_configs \
         import get_default_cfg as get_graphnet_cfg
     import argparse
 

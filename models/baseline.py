@@ -577,62 +577,38 @@ def build_faster_rcnn_based_models(args):
 
 
 if __name__ == '__main__':
-    from datasets.cuhk_sysu import CUHK_SYSU
-    import torchvision.transforms as T
-    from datasets.transforms import ToTensor
+    # testing model
+    from torchvision.transforms import ToTensor
     from configs.faster_rcnn_default_configs import get_default_cfg
-    from easydict import EasyDict
-    from utils.misc import ship_to_cuda
     from datasets import build_trainset
-    from torch.utils.data import DataLoader
     from torch.utils.data.sampler import RandomSampler, BatchSampler
+    from torch.utils.data import DataLoader
+    from utils.misc import ship_to_cuda
 
-    args = get_default_cfg()
-
+    # load dataset, build input
     root = "data/cuhk-sysu"
     transforms = ToTensor()
-
-    # dataset = CUHK_SYSU(root, transforms, "train")
     dataset = build_trainset("cuhk-sysu", root)
 
     sampler = RandomSampler(dataset)
     batch_sampler = BatchSampler(sampler, batch_size=4, drop_last=True)
     dataloader = DataLoader(dataset, batch_sampler=batch_sampler, num_workers=4, collate_fn=lambda x: x)
-
     image1, target1 = dataset[0]
     image2, target2 = dataset[1]
 
-    # image_mean = [0.485, 0.456, 0.406]
-    # image_std = [0.229, 0.224, 0.225]
-    # min_size = 1500
-    # max_size = 900
-    # transform = GeneralizedRCNNTransform(min_size, max_size, image_mean, image_std)
-
-    # images, targets = transform.forward([image1, image2], [target1, target2])
-
     device = "cuda"
-    # device = "cpu"
     device = torch.device(device)
     images = [image1, image2]
     targets = [target1, target2]
     images, targets = ship_to_cuda(images, targets, device)
 
-    # draw boxes
-    # from utils.vis import draw_boxes_text
-    # for i in range(len(images.tensors)):
-    #     img = images.tensors[i]
-    #     boxes = targets[i]["boxes"]
-    #     draw_boxes_text(img, boxes)
-
+    # build
+    args = get_default_cfg()
     model = build_faster_rcnn_based_models(args)
     model.to(device)
 
-    # model.eval()
-
-    # with torch.no_grad():
-    #     outputs = model(images, targets)
-
-    outputs = model(images, targets)
+    with torch.no_grad():
+        outputs = model(images, targets)
 
     from IPython import embed
     embed()

@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# ------------------------
+# train and evaluate models on different det baseline.
+
 wait_time=0s
 echo `date`, "start after ${wait_time}"
 sleep ${wait_time}

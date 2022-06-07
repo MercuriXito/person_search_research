@@ -1,6 +1,0 @@
-train:
-  output_dir: exps/exps_cuhk.graph.lossw_21
-  batch_size: 2
-  loss_weights:
-    loss_graph: 0.5
-
