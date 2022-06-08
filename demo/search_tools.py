@@ -27,7 +27,7 @@ def choose_model_dataset(gallery, method):
             pkl_path = os.path.join(base_root, "exps/exps_cuhk/checkpoint.pth.cmm.G0.4.eval.pkl")
         elif method == "acae":
             exp_dir = os.path.join(base_root, "exps/exps_acae/exps_cuhk.closs_35")
-            pkl_path = os.path.join(base_root, "exps/exps_acae/exps_cuhk.closs_35/checkpoint.pth.acae.G0.4.pkl")
+            pkl_path = os.path.join(base_root, "exps/exps_acae/exps_cuhk.closs_35/checkpoint.pth.acae.G0.4.eval.pkl")
         else:
             raise NotImplementedError(f"{method}")
     elif gallery == "PRW":
